@@ -7,20 +7,16 @@ from PIL import Image
 import io
 import os
 
-# ✅ Cloud Run 환경에서 서비스 계정 키 경로 설정
+# ✅ Cloud Run에서 서비스 계정 키 경로를 명확하게 설정
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/secrets/key.json"
 
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
-
-# Cloud Run 포트 대응
-port = int(os.environ.get("PORT", 8080))  # 기본값 8080
-
-
+port = int(os.environ.get("PORT", 8080))
 
 st.image("object_logo.jpg", width=180)
-
 st.title("📦 Object Swatch OCR")
 st.write("이미지를 업로드하면 품번(Article No)을 자동으로 인식하고 리스트로 변환합니다.")
+
 
 uploaded_files = st.file_uploader("이미지 업로드", accept_multiple_files=True, type=["png", "jpg", "jpeg"])
 
