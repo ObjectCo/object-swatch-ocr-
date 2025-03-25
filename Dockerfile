@@ -7,9 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# ✅ [추가] 서비스 계정 키 파일 복사
-COPY key.json /secrets/key.json
-
 # ✅ [추가] 환경 변수 등록
 ENV GOOGLE_APPLICATION_CREDENTIALS="/secrets/key.json"
 
