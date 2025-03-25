@@ -6,9 +6,6 @@ import base64
 from PIL import Image
 import os
 
-# ✅ Cloud Run 환경변수에서 Credentials 경로 읽기
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 
 # ✅ PORT 환경 변수 설정
