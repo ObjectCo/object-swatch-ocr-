@@ -4,18 +4,16 @@ from extract_article import extract_article_numbers
 import pandas as pd
 import base64
 from PIL import Image
-import io
 import os
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
 
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
+
+# Cloud Run 환경에서는 PORT가 필요
 port = int(os.environ.get("PORT", 8080))
 
 st.image("object_logo.jpg", width=180)
 st.title("📦 Object Swatch OCR")
 st.write("이미지를 업로드하면 품번(Article No)을 자동으로 인식하고 리스트로 변환합니다.")
-
 
 uploaded_files = st.file_uploader("이미지 업로드", accept_multiple_files=True, type=["png", "jpg", "jpeg"])
 
@@ -42,7 +40,6 @@ if results:
             st.markdown(f"**{result['File Name']}**")
             st.write(result["Extracted Articles"])
 
-    # Downloadable CSV
     df = pd.DataFrame([{
         "File Name": r["File Name"],
         "Extracted Articles": r["Extracted Articles"]
@@ -50,3 +47,4 @@ if results:
     csv = df.to_csv(index=False).encode('utf-8')
     b64 = base64.b64encode(csv).decode()
     st.markdown(f'<a href="data:file/csv;base64,{b64}" download="extracted_articles.csv">📥 결과 CSV 다운로드</a>', unsafe_allow_html=True)
+
