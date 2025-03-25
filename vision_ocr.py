@@ -1,9 +1,7 @@
 from google.cloud import vision
 import io
-import os
 
 def extract_text(image):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/secrets/GOOGLE_APPLICATION_CREDENTIALS"
     client = vision.ImageAnnotatorClient()
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
