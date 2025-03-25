@@ -18,3 +18,8 @@ steps:
       - '--allow-unauthenticated'
 options:
   logging: CLOUD_LOGGING_ONLY
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
+
