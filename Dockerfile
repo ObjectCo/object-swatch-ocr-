@@ -1,19 +1,17 @@
-# Dockerfile
-
 FROM python:3.10-slim
 
 WORKDIR /app
 
-# 1. requirements 설치
+# 필수 패키지 설치
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 2. 전체 앱 파일 복사 + 키 파일도 함께 포함
+# 🔥 여기에서 key.json을 반드시 복사해줘야 함
 COPY . .
+COPY key.json /app/key.json   # ✅ 핵심 라인 (꼭 있어야 함)
 
-# 3. 환경 변수 설정 (key.json은 루트 경로에 있다고 가정)
+# 🔐 서비스 계정 키 환경 변수 등록
 ENV GOOGLE_APPLICATION_CREDENTIALS="/app/key.json"
 
-# 4. 포트 및 실행 명령
 EXPOSE 8080
 CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.enableCORS=false", "--server.address=0.0.0.0"]
