@@ -5,8 +5,13 @@ import pandas as pd
 import base64
 from PIL import Image
 import io
+import os
 
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
+
+# Cloud Run 포트 대응
+port = int(os.environ.get("PORT", 8080))  # 기본값 8080
+
 
 st.image("object_logo.jpg", width=180)
 
