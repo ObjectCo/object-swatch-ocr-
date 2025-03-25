@@ -10,15 +10,18 @@ KNOWN_BRANDS = {
     "HKK",
     "HK TEXTILE",
     "UNI TEXTILE",
+    "OHARAYA",
+    "ROCK'N ROLL",
 }
 
-# 불필요 키워드 제거용 패턴
+# 불필요 키워드 제거용
 EXCLUDE_KEYWORDS = {
     "JAPAN", "TOKYO", "OSAKA", "WASHABLE", "COTTON", "LINEN", "LABEL", "WARM", "COOL",
     "WATER", "DESIGN", "COLOR", "SIZE", "COMPO", "STRETCH", "EFFECT", "RESISTANT",
     "QUALITY", "VINTAGE", "TEXTILE", "MADE", "BANSHU-ORI", "TEL", "FAX", "INC", "LTD",
     "CO", "NO", "ARTICLE", "HTTPS", "WWW", "URL", "ATTENTION", "PLEASE", "WE", "ARE",
-    "THE", "AND", "IN", "OF", "WITH", "FOR", "ON", "BY"
+    "THE", "AND", "IN", "OF", "WITH", "FOR", "ON", "BY", "FSCC", "TP", "PS", "C/#",
+    "C/", "C#", "CODE", "E-MAIL", "INFO", "MM", "CM", "M", "G/M", "GSM", "MADE IN", "㈱"
 }
 
 # 브랜드명 추출 함수
@@ -31,27 +34,37 @@ def extract_brands(text):
 
 # 아티클 번호 추출 함수
 def extract_article_numbers(text):
-    # 패턴 예시: BD3991, HT-21000, WD8090, AB-EX171, 1025-600-3, 7025-610-3 등
-    article_pattern = re.compile(r'\b(?:[A-Z]{1,5}-)?[A-Z]{1,5}[-]?\d{3,6}(?:[-]\d{1,3})?\b|\b\d{4,6}\b')
+    lines = text.splitlines()
+    candidates = []
 
-    matches = article_pattern.findall(text)
-    results = []
+    article_pattern = re.compile(
+        r'\b(?:[A-Z]{1,5}-)?[A-Z]{1,5}[-]?\d{3,6}(?:[-]\d{1,3})?\b|\b[A-Z]{2,10}\d{3,6}\b|\b\d{5,6}\b'
+    )
 
-    for token in matches:
-        token_clean = token.strip().upper()
-
-        # 제외 키워드 제거
-        if token_clean in EXCLUDE_KEYWORDS:
+    for line in lines:
+        # 불필요 키워드가 포함된 줄 전체 스킵
+        if any(skip in line.upper() for skip in EXCLUDE_KEYWORDS):
             continue
-        # 전화번호 등 제거
-        if re.match(r"\d{2,4}-\d{2,4}-\d{2,4}", token_clean):
-            continue
-        # 너무 짧은 숫자 (ex: 2023)는 제외
-        if re.fullmatch(r"\d{4}", token_clean) and not re.search(r"[A-Z]", token_clean):
-            continue
-        results.append(token_clean)
 
-    return list(set(results))  # 중복 제거
+        matches = article_pattern.findall(line)
+        for token in matches:
+            token_clean = token.strip().upper()
+
+            # 전화번호 포맷 제거
+            if re.match(r"\d{2,4}-\d{2,4}-\d{2,4}", token_clean):
+                continue
+
+            # 너무 짧은 숫자, 연도 등 제거
+            if re.fullmatch(r"\d{4}", token_clean) and not re.search(r"[A-Z]", token_clean):
+                continue
+
+            # 키워드 포함된 단일 토큰 제거
+            if any(skip in token_clean for skip in EXCLUDE_KEYWORDS):
+                continue
+
+            candidates.append(token_clean)
+
+    return list(set(candidates))  # 중복 제거
 
 # 최종 결과 반환 함수
 def extract_article_and_brand(text):
