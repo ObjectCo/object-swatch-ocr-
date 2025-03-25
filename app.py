@@ -6,9 +6,8 @@ import base64
 from PIL import Image
 import io
 import os
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
-# ✅ Cloud Run에서 서비스 계정 키 경로를 명확하게 설정
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/secrets/key.json"
 
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 port = int(os.environ.get("PORT", 8080))
