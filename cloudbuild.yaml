@@ -12,7 +12,7 @@ steps:
       - '--image'
       - 'gcr.io/$PROJECT_ID/object-swatch-ocr'
       - '--region'
-      - 'asia-northeast3'
+      - 'us-central1'
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
