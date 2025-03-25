@@ -7,10 +7,14 @@ from PIL import Image
 import io
 import os
 
+# ✅ Cloud Run 환경에서 서비스 계정 키 경로 설정
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/secrets/key.json"
+
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 
 # Cloud Run 포트 대응
 port = int(os.environ.get("PORT", 8080))  # 기본값 8080
+
 
 
 st.image("object_logo.jpg", width=180)
