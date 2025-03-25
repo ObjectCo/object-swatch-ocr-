@@ -6,9 +6,12 @@ import base64
 from PIL import Image
 import os
 
+# ✅ Cloud Run 환경변수에서 Credentials 경로 읽기
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 
-# Cloud Run 환경에서는 PORT가 필요
+# ✅ PORT 환경 변수 설정
 port = int(os.environ.get("PORT", 8080))
 
 st.image("object_logo.jpg", width=180)
@@ -46,5 +49,9 @@ if results:
     } for r in results])
     csv = df.to_csv(index=False).encode('utf-8')
     b64 = base64.b64encode(csv).decode()
-    st.markdown(f'<a href="data:file/csv;base64,{b64}" download="extracted_articles.csv">📥 결과 CSV 다운로드</a>', unsafe_allow_html=True)
+    st.markdown(
+        f'<a href="data:file/csv;base64,{b64}" download="extracted_articles.csv">📥 결과 CSV 다운로드</a>',
+        unsafe_allow_html=True
+    )
+
 
