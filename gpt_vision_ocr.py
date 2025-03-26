@@ -51,7 +51,8 @@ def extract_info_from_image(image: Image.Image) -> dict:
             max_tokens=300,
         )
 
-                result_text = response.choices[0].message.content.strip()
+        result_text = response.choices[0].message.content.strip()
+
 
         # 👇 디버깅용 로그 출력
         print("🧾 GPT 응답:", result_text)
@@ -67,7 +68,8 @@ def extract_info_from_image(image: Image.Image) -> dict:
             return {
                 "company": company_match.group(1).strip() if company_match else "[ERROR: Invalid JSON]",
                 "article_numbers": list(set(article_matches)) if article_matches else ["[ERROR: Invalid JSON]"]
-            }
+            }  # ✅ ← 이 return이 빠지면 안 됨
+
 
 
 
