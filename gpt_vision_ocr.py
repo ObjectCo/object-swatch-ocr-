@@ -1,30 +1,29 @@
-import streamlit as st
+iimport streamlit as st
 import openai
 from PIL import Image
 import io
 import base64
 import pandas as pd
 import json
-
 import os
-openai.api_key = os.environ["OPENAI_API_KEY"]
+
+# ✅ OpenAI API Key 환경변수에서 불러오기
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 
-# GPT Vision 호출 함수
 def extract_info_from_image(image: Image.Image):
     try:
-        # 이미지 → base64 인코딩
+        # 이미지 → base64
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
-        # GPT-4o Vision 모델 요청
         response = openai.chat.completions.create(
-            model="gpt-4o",  # 최신 비전 모델
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You're an assistant extracting company name and fabric article numbers from fabric swatch images."
+                    "content": "You're an assistant extracting company name and article numbers from fabric swatch images."
                 },
                 {
                     "role": "user",
@@ -33,11 +32,11 @@ def extract_info_from_image(image: Image.Image):
                             "type": "text",
                             "text": (
                                 "Please extract the brand/company name and the fabric article number(s) from this image. "
-                                "Company names often include terms like 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
-                                "Article numbers usually look like 'AB-EX171', 'BD3991', '7025-610-3', and so on.\n\n"
+                                "Company names include 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
+                                "Article numbers look like 'AB-EX171', 'BD3991', '7025-610-3'.\n\n"
                                 "Return in this exact JSON format:\n"
                                 "{ \"company\": \"<Company Name>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
-                                "If nothing is found, return 'N/A'."
+                                "If not found, return 'N/A'."
                             )
                         },
                         {
@@ -53,7 +52,21 @@ def extract_info_from_image(image: Image.Image):
         )
 
         result_text = response.choices[0].message.content.strip()
-        return json.loads(result_text)  # ✅ 안전한 JSON 파싱
+        
+        # 💥 여기서 문제가 생기고 있었음!
+        try:
+            result = json.loads(result_text)  # 안전한 파싱
+        except json.JSONDecodeError:
+            # GPT 응답이 JSON 형식이 아닐 때 대비
+            return {
+                "company": "[ERROR]",
+                "article_numbers": [f"[ERROR] Invalid JSON: {result_text}"]
+            }
+
+        return {
+            "company": result.get("company", "N/A"),
+            "article_numbers": result.get("article_numbers", ["N/A"])
+        }
 
     except Exception as e:
         return {
