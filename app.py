@@ -1,8 +1,3 @@
-import zipfile
-
-# 다시 실행 환경 초기화됨 → 파일 재생성
-final_code_files = {
-    "app.py": """
 import streamlit as st
 import openai
 from PIL import Image
@@ -17,19 +12,19 @@ import re
 # 🔐 OpenAI API 키 설정
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# ✅ 응답 안전 파싱 함수
+# ✅ GPT 응답을 안전하게 파싱
 def safe_parse_response(result_text: str) -> dict:
     try:
         return json.loads(result_text)
     except json.JSONDecodeError:
-        company_match = re.search(r'"company"\\s*:\\s*"([^"]+)"', result_text)
-        articles = re.findall(r'"([A-Z0-9\\-]{4,})"', result_text)
+        company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
+        articles = re.findall(r'"([A-Z0-9\-]{4,})"', result_text)
         return {
             "company": company_match.group(1).strip() if company_match else "[ERROR: Invalid JSON]",
             "article_numbers": list(set(articles)) if articles else ["[ERROR: Invalid JSON]"]
         }
 
-# 📦 GPT Vision 이미지 분석 함수
+# 📦 GPT Vision 분석 함수
 def extract_info_from_image(image: Image.Image) -> dict:
     try:
         buffered = io.BytesIO()
@@ -41,7 +36,7 @@ def extract_info_from_image(image: Image.Image) -> dict:
             messages=[
                 {
                     "role": "system",
-                    "content": "You're an assistant extracting company name and fabric article numbers from fabric swatch images."
+                    "content": "You are an OCR assistant. Extract the brand/company name and article number(s) from the uploaded fabric swatch image."
                 },
                 {
                     "role": "user",
@@ -49,12 +44,10 @@ def extract_info_from_image(image: Image.Image) -> dict:
                         {
                             "type": "text",
                             "text": (
-                                "Please extract the brand/company name and the fabric article number(s) from this image. "
-                                "Company names often include terms like 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
-                                "Article numbers usually look like 'AB-EX171', 'BD3991', '7025-610-3', and so on.\\n\\n"
-                                "Return in this exact JSON format:\\n"
-                                "{ \\"company\\": \\"<Company Name>\\", \\"article_numbers\\": [\\"<article1>\\", \\"<article2>\\"] }\\n"
-                                "If nothing is found, return 'N/A'."
+                                "Please extract the brand/company name and fabric article number(s).\n"
+                                "- Return exactly in this format (JSON only):\n"
+                                "{ \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
+                                "If not found, return { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
                             )
                         },
                         {
@@ -100,7 +93,6 @@ if uploaded_files:
             "품번": ", ".join(result.get("article_numbers", []))
         }
 
-    # 🔄 병렬 처리
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_map = {executor.submit(process_image, f): f.name for f in uploaded_files}
         for i, future in enumerate(concurrent.futures.as_completed(future_map)):
@@ -114,43 +106,9 @@ if uploaded_files:
                 })
             progress.progress((i + 1) / len(uploaded_files))
 
-    # 🧾 결과 출력
     df = pd.DataFrame(results)
     st.success("✅ 분석 완료!")
     st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("📥 결과 CSV 다운로드", data=csv, file_name="swatch_ocr_results.csv", mime="text/csv")
-""",
-    "requirements.txt": """
-streamlit
-openai
-Pillow
-pandas
-""",
-    "Dockerfile": """
-FROM python:3.10-slim
-
-WORKDIR /app
-
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8080
-CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.enableCORS=false", "--server.address=0.0.0.0"]
-"""
-}
-
-# zip으로 저장
-output_zip_path = "/mnt/data/object_swatch_ocr_final.zip"
-with zipfile.ZipFile(output_zip_path, "w") as zipf:
-    for filename, content in final_code_files.items():
-        file_path = f"/mnt/data/{filename}"
-        with open(file_path, "w") as f:
-            f.write(content.strip())
-        zipf.write(file_path, arcname=filename)
-
-output_zip_path
-
