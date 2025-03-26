@@ -17,7 +17,7 @@ def extract_info_from_image(image: Image.Image):
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
         response = openai.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4-vision",
             messages=[
                 {
                     "role": "system",
