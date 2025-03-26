@@ -1,73 +1,53 @@
+import os
 import io
 import re
-import os
 import base64
 from PIL import Image
-from google.cloud import vision
+import google.generativeai as genai
 
-# ✅ GCP 인증 키 환경변수 확인
-cred_path = "/secrets/GOOGLE_APPLICATION_CREDENTIALS"
-if not os.path.exists(cred_path):
-    raise EnvironmentError("❌ GOOGLE_APPLICATION_CREDENTIALS 파일이 존재하지 않습니다.")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
+# API 키 설정
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("환경변수 GEMINI_API_KEY가 설정되지 않았습니다.")
 
-client = vision.ImageAnnotatorClient()
+genai.configure(api_key=api_key)
 
-# 추출 필터링 키워드
-EXCLUDE_KEYWORDS = {
-    "JAPAN", "TOKYO", "OSAKA", "WASHABLE", "COTTON", "LINEN", "LABEL", "WARM", "COOL",
-    "WATER", "DESIGN", "COLOR", "SIZE", "COMPO", "STRETCH", "EFFECT", "RESISTANT",
-    "QUALITY", "VINTAGE", "TEXTILE", "MADE", "BANSHU-ORI", "TEL", "FAX", "INC", "LTD",
-    "CO", "NO", "ARTICLE", "HTTPS", "WWW", "URL", "ATTENTION", "PLEASE", "WE", "ARE",
-    "THE", "AND", "IN", "OF", "WITH", "FOR", "ON", "BY", "g/m²", "100%", "C-", "PE"
-}
-
-# 브랜드 후보군
-KNOWN_BRANDS = [
-    "KOMON KOBO", "ALLBLUE Inc.", "MATSUBARA CO.,LTD.", "COSMO TEXTILE", "AGUNINO",
-    "HKK", "HK TEXTILE", "UNI TEXTILE", "JAPAN BLUE", "CHAMBRAY", "SHIBAYA"
-]
+model = genai.GenerativeModel("models/gemini-1.5-pro-vision")
 
 def extract_company_and_article(image: Image.Image) -> dict:
+    img_byte_arr = io.BytesIO()
+    image.save(img_byte_arr, format='PNG')
+    image_bytes = img_byte_arr.getvalue()
+
+    prompt = (
+        "You're analyzing a fabric swatch or textile specification sheet. "
+        "Please extract the following:\n"
+        "1. Company or brand name (e.g., 'ALLBLUE Inc.', 'COSMO TEXTILE', 'HK TEXTILE')\n"
+        "2. Article number(s), typically in formats like: 'AB-EX171', 'BD3991', '1025-600-3', etc.\n\n"
+        "🎯 Output ONLY in the following JSON format:\n"
+        "{\n"
+        "  \"company\": \"<Company Name>\",\n"
+        "  \"article_numbers\": [\"<article1>\", \"<article2>\"]\n"
+        "}\n\n"
+        "If any value is not found, return 'N/A'."
+    )
+
     try:
-        # 이미지 -> 바이너리 변환
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format="PNG")
-        content = img_byte_arr.getvalue()
+        response = model.generate_content([
+            prompt,
+            {"mime_type": "image/png", "data": image_bytes}
+        ])
+        text = response.text.strip()
 
-        # Vision API 요청
-        image_obj = vision.Image(content=content)
-        response = client.text_detection(image=image_obj)
-        texts = response.text_annotations
+        company_match = re.search(r'"company"\s*:\s*"([^"]+)"', text)
+        article_matches = re.findall(r'"([A-Z0-9\-]{5,})"', text)
 
-        if not texts:
-            return {"company": "N/A", "article_numbers": ["N/A"]}
+        company = company_match.group(1).strip() if company_match else "N/A"
 
-        ocr_text = texts[0].description.upper()
-
-        # 🔍 브랜드명 추출
-        found_brand = "N/A"
-        for brand in KNOWN_BRANDS:
-            if brand.upper() in ocr_text:
-                found_brand = brand
-                break
-
-        # 🔍 품번 정규식 추출
-        raw_matches = re.findall(r"\b[A-Z]{0,4}-?[A-Z]{0,4}\d{3,6}(?:-\d{1,3})?\b", ocr_text)
-        filtered_articles = []
-        for item in raw_matches:
-            cleaned = item.strip().upper()
-            if cleaned in EXCLUDE_KEYWORDS:
-                continue
-            if re.match(r"^\d{4}$", cleaned):  # 너무 단순한 숫자 제거 (예: 2023)
-                continue
-            filtered_articles.append(cleaned)
-
-        result = {
-            "company": found_brand,
-            "article_numbers": list(set(filtered_articles)) if filtered_articles else ["N/A"]
+        return {
+            "company": company,
+            "article_numbers": list(set(article_matches)) if article_matches else ["N/A"]
         }
-        return result
 
     except Exception as e:
         return {
