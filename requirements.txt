@@ -1,5 +1,4 @@
 streamlit
-Pillow
+pillow
 pandas
-flask
 google-cloud-vision
