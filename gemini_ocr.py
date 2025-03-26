@@ -4,19 +4,19 @@ import re
 from PIL import Image
 import google.generativeai as genai
 
-def extract_company_and_article(image: Image.Image) -> dict:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
-    
-    genai.configure(api_key=api_key)
-    genai.GenerativeModel("models/gemini-pro-vision")  # ✅ 이미지 지원 OK
+# ✅ model 객체 전역으로 선언되도록 try 밖으로 이동
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
 
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel("models/gemini-pro-vision")  # ✅ 안전하게 밖에서 선언
+
+def extract_company_and_article(image: Image.Image) -> dict:
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
     image_bytes = img_byte_arr.getvalue()
 
-    # 💡 회사명 + 아티클 넘버 함께 추출 프롬프트
     prompt = (
         "You're analyzing a fabric swatch information sheet. "
         "Please extract the **company name** and the **article number(s)**. \n"
@@ -35,10 +35,10 @@ def extract_company_and_article(image: Image.Image) -> dict:
             prompt,
             {"mime_type": "image/png", "data": image_bytes}
         ])
-        print("🧪 Gemini 응답 원문:", response.text.strip())
 
-        # ✅ JSON-like 포맷 정제
         text = response.text.strip()
+        print("🧪 Gemini 응답 원문:", text)
+
         company_match = re.search(r'"company"\s*:\s*"([^"]+)"', text)
         articles_match = re.findall(r'"([A-Z]{1,5}-?[A-Z]{0,5}\d{3,6}(?:-\d{1,3})?)"', text)
 
@@ -48,5 +48,9 @@ def extract_company_and_article(image: Image.Image) -> dict:
         }
 
         return result
+
     except Exception as e:
-        return {"company": "[ERROR]", "article_numbers": [f"[ERROR] {str(e)}"]}
+        return {
+            "company": "[ERROR]",
+            "article_numbers": [f"[ERROR] {str(e)}"]
+        }
