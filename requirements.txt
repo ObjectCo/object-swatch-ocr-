@@ -1,4 +1,7 @@
 streamlit
 Pillow
 pandas
-google-generativeai
+requests
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
