@@ -10,7 +10,7 @@ def extract_company_and_article(image: Image.Image) -> dict:
         raise ValueError("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
     
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("models/gemini-pro-vision")
+    model = genai.GenerativeModel("models/gemini-1.5-pro-vision")
 
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
