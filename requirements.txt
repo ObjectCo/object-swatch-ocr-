@@ -1,4 +1,4 @@
 streamlit
-google-cloud-vision
-pillow
+Pillow
 pandas
+google-generativeai
