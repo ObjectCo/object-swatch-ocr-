@@ -1,5 +1,5 @@
 import streamlit as st
-from vision_ocr import extract_text
+from gemini_ocr import extract_text
 from extract_article import extract_article_numbers
 import pandas as pd
 import base64
