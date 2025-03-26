@@ -42,8 +42,4 @@ def upload_file():
 def index():
     return "✅ Object OCR is running!"
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
-
-
 
