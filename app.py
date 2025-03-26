@@ -1,6 +1,5 @@
 import streamlit as st
 from gemini_ocr import extract_text
-from extract_article import extract_article_numbers
 import pandas as pd
 import base64
 from PIL import Image
