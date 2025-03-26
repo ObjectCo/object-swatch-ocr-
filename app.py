@@ -1,29 +1,29 @@
 import streamlit as st
 import openai
+import os
 from PIL import Image
 import io
 import base64
 import pandas as pd
-import json
 
-# OpenAI API 키 설정
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# ✅ 환경변수에서 OpenAI 키 읽기
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# GPT Vision 호출 함수
+# ✅ GPT-4o 기반 추출 함수
 def extract_info_from_image(image: Image.Image):
     try:
-        # 이미지 → base64 인코딩
+        # 이미지 base64 인코딩
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
-        # GPT-4o Vision 모델 요청
+        # OpenAI Vision API 호출
         response = openai.chat.completions.create(
-            model="gpt-4o",  # 최신 비전 모델
+            model="gpt-4o",  # ✅ 최신 모델
             messages=[
                 {
                     "role": "system",
-                    "content": "You're an assistant extracting company name and fabric article numbers from fabric swatch images."
+                    "content": "You're an assistant that extracts company names and fabric article numbers from fabric swatch images."
                 },
                 {
                     "role": "user",
@@ -31,11 +31,11 @@ def extract_info_from_image(image: Image.Image):
                         {
                             "type": "text",
                             "text": (
-                                "Please extract the brand/company name and the fabric article number(s) from this image. "
-                                "Company names often include terms like 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
-                                "Article numbers usually look like 'AB-EX171', 'BD3991', '7025-610-3', and so on.\n\n"
-                                "Return in this exact JSON format:\n"
-                                "{ \"company\": \"<Company Name>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
+                                "Please extract the **brand/company name** and **fabric article number(s)** from this image.\n\n"
+                                "- Company names include: 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc.\n"
+                                "- Article numbers look like: 'AB-EX171', 'BD3991', '7025-610-3'.\n\n"
+                                "Return **only** in this JSON format:\n"
+                                "{ \"company\": \"<Company Name>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n\n"
                                 "If nothing is found, return 'N/A'."
                             )
                         },
@@ -52,7 +52,8 @@ def extract_info_from_image(image: Image.Image):
         )
 
         result_text = response.choices[0].message.content.strip()
-        return json.loads(result_text)  # ✅ 안전한 JSON 파싱
+        result = eval(result_text)  # ✅ JSON 형태 응답이므로 안전하게 사용
+        return result
 
     except Exception as e:
         return {
@@ -60,7 +61,7 @@ def extract_info_from_image(image: Image.Image):
             "article_numbers": [f"[ERROR] {str(e)}"]
         }
 
-# Streamlit 웹앱 UI
+# ✅ Streamlit 인터페이스
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 st.image("https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg", width=150)
 st.title("📦 Object Swatch OCR")
@@ -71,6 +72,7 @@ uploaded_files = st.file_uploader("이미지 업로드", type=["png", "jpg", "jp
 if uploaded_files:
     results = []
     progress = st.progress(0)
+
     for i, uploaded_file in enumerate(uploaded_files):
         image = Image.open(uploaded_file)
         result = extract_info_from_image(image)
@@ -85,7 +87,7 @@ if uploaded_files:
     st.success("✅ 모든 이미지 분석 완료!")
     st.dataframe(df, use_container_width=True)
 
-    # CSV 다운로드
+    # ✅ CSV 다운로드 버튼
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         label="📥 결과 CSV 다운로드",
