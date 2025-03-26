@@ -4,7 +4,7 @@ import re
 from PIL import Image
 import google.generativeai as genai
 
-def extract_text(image: Image.Image) -> list[str]:
+def extract_company_and_article(image: Image.Image) -> dict:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
@@ -16,12 +16,18 @@ def extract_text(image: Image.Image) -> list[str]:
     image.save(img_byte_arr, format='PNG')
     image_bytes = img_byte_arr.getvalue()
 
+    # 💡 개선된 프롬프트: 회사명 + 아티클 넘버 둘 다 추출 요청
     prompt = (
-        "You are analyzing a fabric swatch image. "
-        "Please extract only the article number or product number, such as 'BD3991', 'AB-EX171', 'WD8090', '7025-610-3'. "
-        "Do not include general words like 'COTTON', 'WASHABLE', 'JAPAN', or other unrelated text. "
-        "Return only the article number(s), separated by commas if multiple. "
-        "If none found, return 'N/A'."
+        "You're analyzing a fabric swatch information sheet. "
+        "Please extract the **company name** and the **article number(s)**. \n"
+        "- Company names often end with 'Co.,Ltd.', 'Inc.', '工房', '株式会社', or contain words like 'TEXTILE'.\n"
+        "- Article numbers look like codes such as 'AB-EX171', 'WD8090', 'BD3991', '7025-610-3'.\n\n"
+        "🎯 Return your answer in the following JSON format only:\n"
+        "{\n"
+        "  \"company\": \"<Company Name>\",\n"
+        "  \"article_numbers\": [\"<article1>\", \"<article2>\"]\n"
+        "}\n\n"
+        "If either field is not found, return 'N/A'."
     )
 
     try:
@@ -29,12 +35,18 @@ def extract_text(image: Image.Image) -> list[str]:
             prompt,
             {"mime_type": "image/png", "data": image_bytes}
         ])
-        result_text = response.text.strip()
-        print("🧪 Gemini 원문 응답:", result_text)
+        print("🧪 Gemini 원문 응답:", response.text.strip())
 
-        # ✅ 정규식으로 품번만 추출
-        pattern = re.compile(r'\b(?:[A-Z]{1,5}-)?[A-Z]{1,5}[-]?\d{3,6}(?:[-]\d{1,3})?\b|\b\d{4,6}\b')
-        matches = pattern.findall(result_text)
-        return list(set(matches)) if matches else ["N/A"]
+        # ✅ JSON-like 포맷 정제
+        text = response.text.strip()
+        company_match = re.search(r'"company"\s*:\s*"([^"]+)"', text)
+        articles_match = re.findall(r'"([A-Z]{1,5}-?[A-Z]{0,5}\d{3,6}(?:-\d{1,3})?)"', text)
+
+        result = {
+            "company": company_match.group(1).strip() if company_match else "N/A",
+            "article_numbers": list(set(articles_match)) if articles_match else ["N/A"]
+        }
+
+        return result
     except Exception as e:
-        return [f"[ERROR] {str(e)}"]
+        return {"company": "[ERROR]", "article_numbers": [f"[ERROR] {str(e)}"]}
