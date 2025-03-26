@@ -6,14 +6,18 @@ import re
 from PIL import Image
 import os
 
+# 🔐 OpenAI API 키 설정 (환경변수에서 불러옴)
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
+# 📦 GPT Vision 이미지 분석 함수
 def extract_info_from_image(image: Image.Image) -> dict:
     try:
+        # 이미지 → base64
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+        # 📌 프롬프트 세팅
         prompt_text = (
             "You are an OCR assistant. Extract only the brand/company name and article number(s) from the fabric swatch image.\n"
             "- Company names often include: Co.,Ltd., TEXTILE, Inc., 株式会社\n"
@@ -25,6 +29,7 @@ def extract_info_from_image(image: Image.Image) -> dict:
             "{ \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
         )
 
+        # 🧠 GPT Vision API 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -42,11 +47,11 @@ def extract_info_from_image(image: Image.Image) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # 1차 JSON 파싱 시도
+        # 🧪 1차 JSON 파싱
         try:
             result = json.loads(result_text)
         except json.JSONDecodeError:
-            # fallback 수동 파싱
+            # 🔁 fallback-safe 수동 파싱
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             raw_articles = re.findall(r'"([A-Z0-9\-]{3,})"', result_text)
             result = {
@@ -54,17 +59,21 @@ def extract_info_from_image(image: Image.Image) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # 품번 필터링
+        # 🔍 품번 정제 필터링
         def is_valid_article(article):
+            # 불용어 제거
             if article.upper() in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW"]:
                 return False
-            if re.match(r"(CO|NY|RA|PE)?\d{3,}", article):  # 숫자만 3자리 이상
+            # 3자리 숫자 또는 문자 혼합 가능
+            if re.match(r"(CO|NY|RA|PE)?\d{3,}", article):
                 return True
             if re.match(r"[A-Z0-9\-]{3,}", article):
                 return True
             return False
 
-        result["article_numbers"] = [a for a in result.get("article_numbers", []) if is_valid_article(a)]
+        result["article_numbers"] = [
+            a for a in result.get("article_numbers", []) if is_valid_article(a)
+        ]
 
         if not result.get("company"):
             result["company"] = "N/A"
@@ -73,7 +82,7 @@ def extract_info_from_image(image: Image.Image) -> dict:
 
         return result
 
-        except Exception as e:
+    except Exception as e:
         return {
             "company": "[ERROR]",
             "article_numbers": [f"[ERROR] {str(e)}"]
