@@ -1,4 +1,4 @@
-iimport streamlit as st
+import streamlit as st
 import openai
 from PIL import Image
 import io
@@ -6,14 +6,14 @@ import base64
 import pandas as pd
 import json
 import os
+import concurrent.futures
 
-# ✅ OpenAI API Key 환경변수에서 불러오기
+# 🔐 OpenAI API 키 설정 (환경변수에서 불러옴)
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-
-def extract_info_from_image(image: Image.Image):
+# 📦 GPT Vision 이미지 분석 함수
+def extract_info_from_image(image: Image.Image) -> dict:
     try:
-        # 이미지 → base64
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
@@ -23,7 +23,7 @@ def extract_info_from_image(image: Image.Image):
             messages=[
                 {
                     "role": "system",
-                    "content": "You're an assistant extracting company name and article numbers from fabric swatch images."
+                    "content": "You're an assistant extracting company name and fabric article numbers from fabric swatch images."
                 },
                 {
                     "role": "user",
@@ -32,11 +32,11 @@ def extract_info_from_image(image: Image.Image):
                             "type": "text",
                             "text": (
                                 "Please extract the brand/company name and the fabric article number(s) from this image. "
-                                "Company names include 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
-                                "Article numbers look like 'AB-EX171', 'BD3991', '7025-610-3'.\n\n"
+                                "Company names often include terms like 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
+                                "Article numbers usually look like 'AB-EX171', 'BD3991', '7025-610-3', and so on.\n\n"
                                 "Return in this exact JSON format:\n"
                                 "{ \"company\": \"<Company Name>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
-                                "If not found, return 'N/A'."
+                                "If nothing is found, return 'N/A'."
                             )
                         },
                         {
@@ -52,21 +52,7 @@ def extract_info_from_image(image: Image.Image):
         )
 
         result_text = response.choices[0].message.content.strip()
-        
-        # 💥 여기서 문제가 생기고 있었음!
-        try:
-            result = json.loads(result_text)  # 안전한 파싱
-        except json.JSONDecodeError:
-            # GPT 응답이 JSON 형식이 아닐 때 대비
-            return {
-                "company": "[ERROR]",
-                "article_numbers": [f"[ERROR] Invalid JSON: {result_text}"]
-            }
-
-        return {
-            "company": result.get("company", "N/A"),
-            "article_numbers": result.get("article_numbers", ["N/A"])
-        }
+        return json.loads(result_text)
 
     except Exception as e:
         return {
@@ -74,7 +60,7 @@ def extract_info_from_image(image: Image.Image):
             "article_numbers": [f"[ERROR] {str(e)}"]
         }
 
-# Streamlit 웹앱 UI
+# 🌐 Streamlit 웹앱
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 st.image("https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg", width=150)
 st.title("📦 Object Swatch OCR")
@@ -83,27 +69,37 @@ st.markdown("이미지를 업로드하면 회사명과 품번(Article No)을 자
 uploaded_files = st.file_uploader("이미지 업로드", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
 if uploaded_files:
+    st.subheader("⏳ 이미지 분석 중입니다...")
     results = []
     progress = st.progress(0)
-    for i, uploaded_file in enumerate(uploaded_files):
-        image = Image.open(uploaded_file)
+
+    def process_image(i_file):
+        image = Image.open(i_file)
         result = extract_info_from_image(image)
-        results.append({
-            "파일명": uploaded_file.name,
+        return {
+            "파일명": i_file.name,
             "브랜드명": result.get("company", "N/A"),
             "품번": ", ".join(result.get("article_numbers", []))
-        })
-        progress.progress((i + 1) / len(uploaded_files))
+        }
 
+    # 🔄 병렬 처리로 속도 향상
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_map = {executor.submit(process_image, f): f.name for f in uploaded_files}
+        for i, future in enumerate(concurrent.futures.as_completed(future_map)):
+            try:
+                results.append(future.result())
+            except Exception as e:
+                results.append({
+                    "파일명": future_map[future],
+                    "브랜드명": "[ERROR]",
+                    "품번": f"[ERROR] {str(e)}"
+                })
+            progress.progress((i + 1) / len(uploaded_files))
+
+    # 🧾 결과 출력
     df = pd.DataFrame(results)
-    st.success("✅ 모든 이미지 분석 완료!")
+    st.success("✅ 분석 완료!")
     st.dataframe(df, use_container_width=True)
 
-    # CSV 다운로드
     csv = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        label="📥 결과 CSV 다운로드",
-        data=csv,
-        file_name="swatch_ocr_results.csv",
-        mime="text/csv"
-    )
+    st.download_button("📥 결과 CSV 다운로드", data=csv, file_name="swatch_ocr_results.csv", mime="text/csv")
