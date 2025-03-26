@@ -1,26 +1,36 @@
+import os
 import io
+import json
 import re
+import requests
 from PIL import Image
-import vertexai
-from vertexai.preview.vision_models import ImageToTextModel, Image as GeminiImage
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 
+# 프로젝트 설정
+PROJECT_ID = "your-project-id"  # ✅ 실제 GCP 프로젝트 ID로 변경
+REGION = "us-central1"
+MODEL_ID = "gemini-1.0-pro-vision"
 
-# ✅ Cloud 프로젝트 및 리전 설정
-vertexai.init(project="your-project-id", location="us-central1")
+# 서비스 계정 키로 인증 토큰 생성
+def get_access_token():
+    credentials = service_account.Credentials.from_service_account_file(
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    credentials.refresh(Request())
+    return credentials.token
 
-# ✅ 메인 함수: app.py에서 임포트할 함수
+# 메인 추출 함수
 def extract_company_and_article(image_pil: Image.Image) -> dict:
     try:
-        # 이미지 → byte 변환
+        # 이미지 → base64 인코딩
         img_byte_arr = io.BytesIO()
-        image_pil.save(img_byte_arr, format="PNG")
+        image_pil.save(img_byte_arr, format='PNG')
         image_bytes = img_byte_arr.getvalue()
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        # Gemini Vision 모델 준비
-        gemini_image = GeminiImage(image_bytes=image_bytes)
-        model = ImageToTextModel.from_pretrained("gemini-1.0-pro-vision")
-
-        # 프롬프트: 회사명 + 품번을 JSON 형태로 추출 요청
+        # 프롬프트 구성
         prompt = (
             "You're analyzing a fabric swatch. Please extract the company name and article number(s). "
             "Article numbers look like: AB-EX171, BD3991, 1025-600-3, etc. "
@@ -32,9 +42,38 @@ def extract_company_and_article(image_pil: Image.Image) -> dict:
             "}"
         )
 
-        # 추론 요청
-        response = model.predict(image=gemini_image, prompt=prompt, max_output_tokens=1024)
-        text = response.text.strip()
+        # 요청 준비
+        endpoint = f"https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{REGION}/publishers/google/models/{MODEL_ID}:predict"
+        access_token = get_access_token()
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        body = {
+            "instances": [
+                {
+                    "prompt": prompt,
+                    "image": {
+                        "bytesBase64Encoded": image_base64,
+                        "mimeType": "image/png"
+                    }
+                }
+            ],
+            "parameters": {
+                "temperature": 0.4,
+                "maxOutputTokens": 1024,
+                "topP": 1,
+                "topK": 40
+            }
+        }
+
+        response = requests.post(endpoint, headers=headers, json=body)
+        result = response.json()
+        text = result["predictions"][0]["content"]
+
+        print("🧪 Gemini 응답:", text)
 
         # JSON-like 응답 파싱
         company_match = re.search(r'"company"\s*:\s*"([^"]+)"', text)
