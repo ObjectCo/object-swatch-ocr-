@@ -5,8 +5,8 @@ import io
 import base64
 import pandas as pd
 
-# OpenAI API Key 설정
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+import os
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # GPT Vision 호출 함수
 def extract_info_from_image(image: Image.Image):
