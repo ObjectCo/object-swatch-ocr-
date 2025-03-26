@@ -1,4 +1,4 @@
 streamlit
 pillow
 pandas
-google-cloud-aiplatform
+google-cloud-aiplatform>=1.44.0
