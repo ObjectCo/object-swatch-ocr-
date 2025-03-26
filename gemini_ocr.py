@@ -3,6 +3,7 @@ import io
 import json
 import re
 import requests
+import base64
 from PIL import Image
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
