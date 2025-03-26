@@ -1,4 +1,5 @@
 streamlit
-pillow
+Pillow
 pandas
-google-cloud-aiplatform>=1.44.0
+flask
+google-cloud-vision
