@@ -14,16 +14,18 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 # 📦 GPT Vision 이미지 분석 함수
 def extract_info_from_image(image: Image.Image) -> dict:
     try:
+        # 이미지 → base64 인코딩
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
+        # GPT-4o Vision 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You're an assistant extracting company name and fabric article numbers from fabric swatch images."
+                    "content": "You are an OCR assistant. Extract the brand/company name and article number(s) from the uploaded fabric swatch image."
                 },
                 {
                     "role": "user",
@@ -31,12 +33,10 @@ def extract_info_from_image(image: Image.Image) -> dict:
                         {
                             "type": "text",
                             "text": (
-                                "Please extract the brand/company name and the fabric article number(s) from this image. "
-                                "Company names often include terms like 'Co.,Ltd.', 'Inc.', 'TEXTILE', '株式会社', etc. "
-                                "Article numbers usually look like 'AB-EX171', 'BD3991', '7025-610-3', and so on.\n\n"
-                                "Return in this exact JSON format:\n"
-                                "{ \"company\": \"<Company Name>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
-                                "If nothing is found, return 'N/A'."
+                                "Please extract the brand/company name and fabric article number(s).\n"
+                                "- Return exactly in this format (JSON only):\n"
+                                "{ \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
+                                "If not found, return { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
                             )
                         },
                         {
@@ -52,13 +52,23 @@ def extract_info_from_image(image: Image.Image) -> dict:
         )
 
         result_text = response.choices[0].message.content.strip()
+
+        # 👇 디버깅용 로그
+        print("🧾 GPT 응답:", result_text)
+
         return json.loads(result_text)
 
+    except json.JSONDecodeError as e:
+        return {
+            "company": "[ERROR]",
+            "article_numbers": [f"[ERROR] JSON decode error: {str(e)}"]
+        }
     except Exception as e:
         return {
             "company": "[ERROR]",
             "article_numbers": [f"[ERROR] {str(e)}"]
         }
+
 
 # 🌐 Streamlit 웹앱
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
