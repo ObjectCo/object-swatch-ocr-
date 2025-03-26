@@ -1,8 +1,8 @@
-
 import os
 import io
-import re
+import json  # ✅ 이 줄 추가!
 import base64
+import re
 import requests
 from PIL import Image
 
