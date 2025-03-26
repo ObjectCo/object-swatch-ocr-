@@ -16,7 +16,7 @@ def extract_company_and_article(image: Image.Image) -> dict:
     image.save(img_byte_arr, format='PNG')
     image_bytes = img_byte_arr.getvalue()
 
-    # 💡 개선된 프롬프트: 회사명 + 아티클 넘버 둘 다 추출 요청
+    # 💡 회사명 + 아티클 넘버 함께 추출 프롬프트
     prompt = (
         "You're analyzing a fabric swatch information sheet. "
         "Please extract the **company name** and the **article number(s)**. \n"
@@ -35,7 +35,7 @@ def extract_company_and_article(image: Image.Image) -> dict:
             prompt,
             {"mime_type": "image/png", "data": image_bytes}
         ])
-        print("🧪 Gemini 원문 응답:", response.text.strip())
+        print("🧪 Gemini 응답 원문:", response.text.strip())
 
         # ✅ JSON-like 포맷 정제
         text = response.text.strip()
