@@ -8,6 +8,9 @@ def extract_text(image):
     content = img_byte_arr.getvalue()
 
     image = vision.Image(content=content)
-    response = client.text_detection(image=image)
+    
+    # ✅ 여기 수정됨
+    response = client.document_text_detection(image=image)
+    
     texts = response.text_annotations
     return texts[0].description if texts else ""
