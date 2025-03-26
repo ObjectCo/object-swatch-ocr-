@@ -1,24 +1,21 @@
 import os
 import io
+import re
 from PIL import Image
 import google.generativeai as genai
 
-def extract_text(image: Image.Image) -> str:
-    # 환경 변수에서 API 키 가져오기
+def extract_text(image: Image.Image) -> list[str]:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
     
-    # Gemini 설정
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("models/gemini-pro-vision")
 
-    # 이미지 → 바이트 변환
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
     image_bytes = img_byte_arr.getvalue()
 
-    # 🧠 여기서 핵심: Article Number만 추출하도록 명확한 지시어 작성
     prompt = (
         "You are analyzing a fabric swatch image. "
         "Please extract only the article number or product number, such as 'BD3991', 'AB-EX171', 'WD8090', '7025-610-3'. "
@@ -32,8 +29,12 @@ def extract_text(image: Image.Image) -> str:
             prompt,
             {"mime_type": "image/png", "data": image_bytes}
         ])
-        result = response.text.strip()
-        print("🧪 Gemini 추출 결과:", result)  # 디버깅용 출력
-        return result
+        result_text = response.text.strip()
+        print("🧪 Gemini 원문 응답:", result_text)
+
+        # ✅ 정규식으로 품번만 추출
+        pattern = re.compile(r'\b(?:[A-Z]{1,5}-)?[A-Z]{1,5}[-]?\d{3,6}(?:[-]\d{1,3})?\b|\b\d{4,6}\b')
+        matches = pattern.findall(result_text)
+        return list(set(matches)) if matches else ["N/A"]
     except Exception as e:
-        return f"[ERROR] {str(e)}"
+        return [f"[ERROR] {str(e)}"]
