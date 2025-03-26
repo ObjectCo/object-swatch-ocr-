@@ -6,30 +6,29 @@ import re
 from PIL import Image
 import os
 
-# 🔐 OpenAI API 키 설정 (환경변수에서 불러옴)
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# 📦 GPT Vision 이미지 분석 함수
 def extract_info_from_image(image: Image.Image) -> dict:
     try:
-        # 이미지 → base64
+        # 이미지 인코딩
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # 📌 프롬프트 세팅
         prompt_text = (
             "You are an OCR assistant. Extract only the brand/company name and article number(s) from the fabric swatch image.\n"
-            "- Company names often include: Co.,Ltd., TEXTILE, Inc., 株式会社\n"
-            "- Article numbers may look like: BD3991, TXAB-H062, 7025-610-3, 103\n"
-            "- Return strictly in JSON format like this:\n"
-            "{ \"company\": \"<Brand Name>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
-            "- Do not return any text outside of this JSON format.\n"
-            "- If nothing found, return:\n"
+            "- Company names include: Co.,Ltd., TEXTILE, Inc., 株式会社\n"
+            "- Article numbers look like: BD3991, TXAB-H062, 7025-610-3, 103\n"
+            "- Do NOT return ranges like '4001-4003'. Return each article number explicitly.\n"
+            "- Return only valid article numbers, each at least 3 characters, alphanumeric.\n"
+            "- Output strictly JSON only. No explanation, no markdown, no text around.\n"
+            "- Format:\n"
+            "{ \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
+            "- If not found, return:\n"
             "{ \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
         )
 
-        # 🧠 GPT Vision API 호출
+        # GPT Vision 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -47,11 +46,11 @@ def extract_info_from_image(image: Image.Image) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # 🧪 1차 JSON 파싱
+        # 1차: JSON 파싱
         try:
             result = json.loads(result_text)
         except json.JSONDecodeError:
-            # 🔁 fallback-safe 수동 파싱
+            # 2차: 수동 파싱 fallback
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             raw_articles = re.findall(r'"([A-Z0-9\-]{3,})"', result_text)
             result = {
@@ -59,22 +58,26 @@ def extract_info_from_image(image: Image.Image) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # 🔍 품번 정제 필터링
-        def is_valid_article(article):
-            # 불용어 제거
-            if article.upper() in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW"]:
+        # ✅ 후처리: 품번 필터링
+        def is_valid_article(a):
+            if a.upper() in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW", "URL"]:
                 return False
-            # 3자리 숫자 또는 문자 혼합 가능
-            if re.match(r"(CO|NY|RA|PE)?\d{3,}", article):
-                return True
-            if re.match(r"[A-Z0-9\-]{3,}", article):
-                return True
-            return False
+            if "-" in a and re.fullmatch(r"[A-Z]*\d{3,}-\d{3,}", a):  # 의심 범위표현 제거
+                return False
+            return re.fullmatch(r"[A-Z0-9\-]{3,}", a) is not None
 
-        result["article_numbers"] = [
-            a for a in result.get("article_numbers", []) if is_valid_article(a)
-        ]
+        result["article_numbers"] = [a for a in result.get("article_numbers", []) if is_valid_article(a)]
 
+        # ✅ 후처리: 브랜드명 보정
+        brand_corrections = {
+            "Cosmo": "COSMO TEXTILE CO., LTD.",
+            "Cosmo Co., Ltd.": "COSMO TEXTILE CO., LTD.",
+            "Oharayaseni Co.,Ltd": "Oharayaseni Co.,Ltd.",
+        }
+        brand = result.get("company", "N/A")
+        result["company"] = brand_corrections.get(brand, brand)
+
+        # ✅ 기본값 보정
         if not result.get("company"):
             result["company"] = "N/A"
         if not result.get("article_numbers"):
@@ -87,5 +90,4 @@ def extract_info_from_image(image: Image.Image) -> dict:
             "company": "[ERROR]",
             "article_numbers": [f"[ERROR] {str(e)}"]
         }
-
 
