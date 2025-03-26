@@ -20,7 +20,6 @@ results = []
 for uploaded_file in uploaded_files:
     image = Image.open(uploaded_file)
     text = extract_text(image)
-    articles = extract_article_numbers(text)
     results.append({
         "File Name": uploaded_file.name,
         "Thumbnail": image,
