@@ -4,20 +4,22 @@ from PIL import Image
 import io
 import base64
 import pandas as pd
+import json
 
-import os
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# OpenAI API 키 설정
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # GPT Vision 호출 함수
 def extract_info_from_image(image: Image.Image):
     try:
-        # 이미지 base64 인코딩
+        # 이미지 → base64 인코딩
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
+        # GPT-4o Vision 모델 요청
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o",  # 최신 비전 모델
             messages=[
                 {
                     "role": "system",
@@ -50,12 +52,15 @@ def extract_info_from_image(image: Image.Image):
         )
 
         result_text = response.choices[0].message.content.strip()
-        return eval(result_text)  # 안전한 경우에만 eval 사용
+        return json.loads(result_text)  # ✅ 안전한 JSON 파싱
 
     except Exception as e:
-        return {"company": "[ERROR]", "article_numbers": [f"[ERROR] {str(e)}"]}
+        return {
+            "company": "[ERROR]",
+            "article_numbers": [f"[ERROR] {str(e)}"]
+        }
 
-# Streamlit 인터페이스
+# Streamlit 웹앱 UI
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 st.image("https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg", width=150)
 st.title("📦 Object Swatch OCR")
@@ -80,7 +85,7 @@ if uploaded_files:
     st.success("✅ 모든 이미지 분석 완료!")
     st.dataframe(df, use_container_width=True)
 
-    # CSV 다운로드 버튼
+    # CSV 다운로드
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         label="📥 결과 CSV 다운로드",
