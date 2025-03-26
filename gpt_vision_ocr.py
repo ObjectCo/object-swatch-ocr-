@@ -24,7 +24,7 @@ def extract_company_and_article(image: Image.Image) -> dict:
         }
 
         payload = {
-            "model": "gpt-4-vision-preview",
+            "model": "gpt-4o",
             "messages": [
                 {
                     "role": "user",
