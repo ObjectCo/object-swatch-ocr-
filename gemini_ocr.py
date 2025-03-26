@@ -1,70 +1,73 @@
 import io
 import re
+import os
 import base64
-from typing import Dict
 from PIL import Image
 from google.cloud import vision
-from google.oauth2 import service_account
 
-# ✅ Cloud Run에 마운트된 서비스 계정 키 경로
-CREDENTIAL_PATH = "/secrets/GOOGLE_APPLICATION_CREDENTIALS"
+# ✅ GCP 인증 키 환경변수 확인
+cred_path = "/secrets/GOOGLE_APPLICATION_CREDENTIALS"
+if not os.path.exists(cred_path):
+    raise EnvironmentError("❌ GOOGLE_APPLICATION_CREDENTIALS 파일이 존재하지 않습니다.")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
 
-# ✅ Vision API 클라이언트 생성
-credentials = service_account.Credentials.from_service_account_file(CREDENTIAL_PATH)
-client = vision.ImageAnnotatorClient(credentials=credentials)
+client = vision.ImageAnnotatorClient()
 
-# ✅ 브랜드명, 품번 추출 함수
-def extract_company_and_article(image: Image.Image) -> Dict:
+# 추출 필터링 키워드
+EXCLUDE_KEYWORDS = {
+    "JAPAN", "TOKYO", "OSAKA", "WASHABLE", "COTTON", "LINEN", "LABEL", "WARM", "COOL",
+    "WATER", "DESIGN", "COLOR", "SIZE", "COMPO", "STRETCH", "EFFECT", "RESISTANT",
+    "QUALITY", "VINTAGE", "TEXTILE", "MADE", "BANSHU-ORI", "TEL", "FAX", "INC", "LTD",
+    "CO", "NO", "ARTICLE", "HTTPS", "WWW", "URL", "ATTENTION", "PLEASE", "WE", "ARE",
+    "THE", "AND", "IN", "OF", "WITH", "FOR", "ON", "BY", "g/m²", "100%", "C-", "PE"
+}
+
+# 브랜드 후보군
+KNOWN_BRANDS = [
+    "KOMON KOBO", "ALLBLUE Inc.", "MATSUBARA CO.,LTD.", "COSMO TEXTILE", "AGUNINO",
+    "HKK", "HK TEXTILE", "UNI TEXTILE", "JAPAN BLUE", "CHAMBRAY", "SHIBAYA"
+]
+
+def extract_company_and_article(image: Image.Image) -> dict:
     try:
-        # 이미지 → 바이트 변환
+        # 이미지 -> 바이너리 변환
         img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='PNG')
+        image.save(img_byte_arr, format="PNG")
         content = img_byte_arr.getvalue()
 
         # Vision API 요청
-        image_for_api = vision.Image(content=content)
-        response = client.text_detection(image=image_for_api)
-
+        image_obj = vision.Image(content=content)
+        response = client.text_detection(image=image_obj)
         texts = response.text_annotations
+
         if not texts:
             return {"company": "N/A", "article_numbers": ["N/A"]}
 
-        raw_text = texts[0].description
-        print("🧾 OCR 전체 텍스트:", raw_text)
+        ocr_text = texts[0].description.upper()
 
-        # 브랜드명 추출
-        company_pattern = re.compile(r"\b(?:[A-Z][A-Za-z&.,\s\-]{2,}TEXTILE|[A-Z][A-Za-z&.,\s\-]+(?:Co\.?,? Ltd\.?|Inc\.?|株式会社|工房))\b", re.IGNORECASE)
-        company_match = company_pattern.findall(raw_text)
-        company_name = company_match[0].strip() if company_match else "N/A"
+        # 🔍 브랜드명 추출
+        found_brand = "N/A"
+        for brand in KNOWN_BRANDS:
+            if brand.upper() in ocr_text:
+                found_brand = brand
+                break
 
-        # 아티클 번호 추출
-        article_pattern = re.compile(r"\b(?:[A-Z]{1,5}-)?[A-Z]{1,5}[-]?\d{3,6}(?:[-]\d{1,3})?\b|\b\d{4,6}\b")
-        all_matches = article_pattern.findall(raw_text)
+        # 🔍 품번 정규식 추출
+        raw_matches = re.findall(r"\b[A-Z]{0,4}-?[A-Z]{0,4}\d{3,6}(?:-\d{1,3})?\b", ocr_text)
+        filtered_articles = []
+        for item in raw_matches:
+            cleaned = item.strip().upper()
+            if cleaned in EXCLUDE_KEYWORDS:
+                continue
+            if re.match(r"^\d{4}$", cleaned):  # 너무 단순한 숫자 제거 (예: 2023)
+                continue
+            filtered_articles.append(cleaned)
 
-        # 잡 텍스트 필터링
-        EXCLUDE_KEYWORDS = {
-            "JAPAN", "TOKYO", "OSAKA", "WASHABLE", "COTTON", "LINEN", "LABEL", "WARM", "COOL",
-            "WATER", "DESIGN", "COLOR", "SIZE", "COMPO", "STRETCH", "EFFECT", "RESISTANT",
-            "QUALITY", "VINTAGE", "TEXTILE", "MADE", "BANSHU-ORI", "TEL", "FAX", "INC", "LTD",
-            "CO", "NO", "ARTICLE", "HTTPS", "WWW", "URL", "ATTENTION", "PLEASE", "WE", "ARE",
-            "THE", "AND", "IN", "OF", "WITH", "FOR", "ON", "BY"
+        result = {
+            "company": found_brand,
+            "article_numbers": list(set(filtered_articles)) if filtered_articles else ["N/A"]
         }
-
-        articles = []
-        for token in all_matches:
-            token_clean = token.strip().upper()
-            if token_clean in EXCLUDE_KEYWORDS:
-                continue
-            if re.match(r"\d{2,4}-\d{2,4}-\d{2,4}", token_clean):
-                continue
-            if re.fullmatch(r"\d{4}", token_clean) and not re.search(r"[A-Z]", token_clean):
-                continue
-            articles.append(token_clean)
-
-        return {
-            "company": company_name,
-            "article_numbers": list(set(articles)) if articles else ["N/A"]
-        }
+        return result
 
     except Exception as e:
         return {
