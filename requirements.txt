@@ -1,5 +1,4 @@
-streamlit
-Pillow
-pandas
-google-generativeai
-flask
+streamlit>=1.30
+pillow>=10.0
+pandas>=2.0
+google-generativeai>=0.3.0
