@@ -2,7 +2,8 @@ import io
 import re
 from PIL import Image
 import vertexai
-from vertexai.vision_models import ImageToTextModel, Image as GeminiImage
+from vertexai.preview.vision_models import ImageToTextModel, Image as GeminiImage
+
 
 # ✅ Cloud 프로젝트 및 리전 설정
 vertexai.init(project="your-project-id", location="us-central1")
