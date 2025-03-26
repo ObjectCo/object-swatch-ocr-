@@ -14,18 +14,20 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 # 📦 GPT Vision 이미지 분석 함수
 def extract_info_from_image(image: Image.Image) -> dict:
     try:
-        # 이미지 → base64 인코딩
+        import re
+
+        # 이미지 → base64
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
-        # GPT-4o Vision 호출
+        # GPT Vision 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an OCR assistant. Extract the brand/company name and article number(s) from the uploaded fabric swatch image."
+                    "content": "You are a helpful assistant extracting brand/company name and article numbers from fabric swatch images."
                 },
                 {
                     "role": "user",
@@ -33,10 +35,13 @@ def extract_info_from_image(image: Image.Image) -> dict:
                         {
                             "type": "text",
                             "text": (
-                                "Please extract the brand/company name and fabric article number(s).\n"
-                                "- Return exactly in this format (JSON only):\n"
-                                "{ \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
-                                "If not found, return { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
+                                "Extract only the **brand/company name** and **article number(s)** from the fabric swatch image.\n\n"
+                                "Company names often contain: Co.,Ltd., TEXTILE, Inc., 株式会社\n"
+                                "Article numbers usually look like: BD3991, TXAB-H062, 7025-610-3\n\n"
+                                "✅ Return this JSON only:\n"
+                                "{ \"company\": \"<Company>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n\n"
+                                "If not found, return:\n"
+                                "{ \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
                             )
                         },
                         {
@@ -48,27 +53,31 @@ def extract_info_from_image(image: Image.Image) -> dict:
                     ]
                 }
             ],
-            max_tokens=300,
+            max_tokens=500
         )
 
         result_text = response.choices[0].message.content.strip()
+        print("🧾 GPT 응답:", result_text)  # (선택) 디버깅용
 
-
-        # 👇 디버깅용 로그 출력
-        print("🧾 GPT 응답:", result_text)
-
+        # 1차 JSON 파싱
         try:
             return json.loads(result_text)
+
+        # 2차 수동 추출
         except json.JSONDecodeError:
-            # JSON 파싱 실패 시 수동 추출 시도
-            import re
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             article_matches = re.findall(r'"([A-Z0-9\-]{4,})"', result_text)
 
             return {
                 "company": company_match.group(1).strip() if company_match else "[ERROR: Invalid JSON]",
                 "article_numbers": list(set(article_matches)) if article_matches else ["[ERROR: Invalid JSON]"]
-            }  # ✅ ← 이 return이 빠지면 안 됨
+            }
+
+    except Exception as e:
+        return {
+            "company": "[ERROR]",
+            "article_numbers": [f"[ERROR] {str(e)}"]
+        }
 
 
 
