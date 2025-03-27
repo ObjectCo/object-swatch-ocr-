@@ -2,4 +2,3 @@ streamlit
 pandas
 Pillow
 openai>=1.2.0
-google-cloud-vision
