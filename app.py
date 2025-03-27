@@ -37,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 타이틀 및 로고
-st.image("https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg", width=140)
+st.image("object_logo.jpg", width=140)
 st.title("📦 Object Swatch OCR")
 st.markdown("이미지를 업로드하면 브랜드명과 품번을 자동 인식하여 리스트로 출력합니다.")
 
