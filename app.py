@@ -54,7 +54,7 @@ if uploaded_files:
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        result = extract_info_from_image(image, filename=i_file.name)
+        result = extract_info_from_image(image)
         unique_id = i_file.name.replace(".", "").replace(" ", "").replace("/", "_")
         return {
             "썸네일": f"""
