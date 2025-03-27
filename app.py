@@ -1,7 +1,6 @@
 import streamlit as st
-from PIL import Image
 import pandas as pd
-import os
+from PIL import Image
 import concurrent.futures
 from gpt_vision_ocr import extract_info_from_image
 
@@ -45,4 +44,3 @@ if uploaded_files:
 
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("📥 결과 CSV 다운로드", data=csv, file_name="swatch_ocr_results.csv", mime="text/csv")
-
