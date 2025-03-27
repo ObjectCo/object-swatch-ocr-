@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from PIL import Image
+import base64
+import io
 import concurrent.futures
 from gpt_vision_ocr import extract_info_from_image
 
@@ -19,8 +21,23 @@ if uploaded_files:
     def process_image(i_file):
         image = Image.open(i_file)
         result = extract_info_from_image(image)
+
+        # 썸네일 이미지 base64 인코딩
+        thumb_img = image.copy()
+        thumb_img.thumbnail((50, 50))  # 아주 작게
+        buffer = io.BytesIO()
+        thumb_img.save(buffer, format="PNG")
+        img_b64 = base64.b64encode(buffer.getvalue()).decode()
+
+        # 썸네일 + 파일명 조합 (클릭 시 새 탭에 원본 이미지)
+        file_display = f"""
+            <a href="data:image/png;base64,{img_b64}" target="_blank">
+                <img src="data:image/png;base64,{img_b64}" style="height:1em; vertical-align:middle;" />
+            </a> <span style="vertical-align:middle;">{i_file.name}</span>
+        """
+
         return {
-            "파일명": i_file.name,
+            "파일명": file_display,
             "브랜드명": result.get("company", "N/A"),
             "품번": ", ".join(result.get("article_numbers", []))
         }
@@ -40,7 +57,14 @@ if uploaded_files:
 
     df = pd.DataFrame(results)
     st.success("✅ 분석 완료!")
-    st.dataframe(df, use_container_width=True)
 
-    csv = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("📥 결과 CSV 다운로드", data=csv, file_name="swatch_ocr_results.csv", mime="text/csv")
+    st.markdown("아래 결과는 **엑셀에 복사 & 붙여넣기** 가능합니다.")
+    st.markdown(
+        df.to_html(escape=False, index=False),
+        unsafe_allow_html=True
+    )
+
+    csv = df.copy()
+    csv["파일명"] = csv["파일명"].str.extract(r'>([^<]+)</span>')  # CSV 저장용: 파일명 텍스트만
+    csv_data = csv.to_csv(index=False).encode("utf-8-sig")
+    st.download_button("📥 결과 CSV 다운로드", data=csv_data, file_name="swatch_ocr_results.csv", mime="text/csv")
