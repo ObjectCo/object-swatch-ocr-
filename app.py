@@ -23,18 +23,20 @@ if uploaded_files:
     def process_image(file):
         image = Image.open(file)
         result = extract_info_from_image(image, filename=file.name)
+
+        # 썸네일 생성
+        image_copy = image.copy()
+        image_copy.thumbnail((300, 300))
         buffered = io.BytesIO()
-        image.thumbnail((300, 300))
-        image.save(buffered, format="PNG")
-        img_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        image_copy.save(buffered, format="PNG")
+        img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
         return {
             "파일명": file.name,
             "브랜드명": result.get("company", "N/A"),
             "품번": ", ".join(result.get("article_numbers", [])),
-            "img_b64": img_data
+            "img_b64": img_b64
         }
 
-    # 병렬 처리
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_map = {executor.submit(process_image, f): f.name for f in uploaded_files}
         for i, future in enumerate(concurrent.futures.as_completed(future_map)):
@@ -49,10 +51,10 @@ if uploaded_files:
                 })
             progress.progress((i + 1) / len(uploaded_files))
 
-    # ✅ 결과 테이블 + 썸네일 + 팝업
     st.success("✅ 분석 완료!")
     st.markdown("아래 결과 테이블을 엑셀에 복사해서 사용할 수 있습니다.")
 
+    # ✅ HTML 테이블로 렌더링
     table_html = """
     <style>
     .ocr-table {
@@ -75,16 +77,21 @@ if uploaded_files:
         transition: transform 0.2s ease;
     }
     .img-thumb:hover {
-        transform: scale(1.5);
+        transform: scale(3.2);
+        z-index: 10;
+        position: relative;
     }
     </style>
     <table class='ocr-table'>
-        <tr>
-            <th>썸네일</th>
-            <th>파일명</th>
-            <th>브랜드명</th>
-            <th>품번</th>
-        </tr>
+        <thead>
+            <tr>
+                <th>썸네일</th>
+                <th>파일명</th>
+                <th>브랜드명</th>
+                <th>품번</th>
+            </tr>
+        </thead>
+        <tbody>
     """
 
     for r in results:
@@ -98,7 +105,7 @@ if uploaded_files:
         </tr>
         """
 
-    table_html += "</table>"
+    table_html += "</tbody></table>"
     st.markdown(table_html, unsafe_allow_html=True)
 
     # 📥 CSV 다운로드
