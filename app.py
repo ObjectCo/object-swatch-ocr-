@@ -7,14 +7,7 @@ import os
 import concurrent.futures
 from gpt_vision_ocr import extract_info_from_image
 
-# 🌐 페이지 설정
-st.set_page_config(
-    page_title="Object Swatch OCR",
-    page_icon="🧵",  # 또는 URL: "https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg"
-    layout="wide"
-)
-
-# 헤더 UI
+st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 st.image("https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg", width=150)
 st.title("📦 Object Swatch OCR")
 st.markdown("이미지를 업로드하면 브랜드명과 품번을 자동 인식하여 리스트로 출력합니다.")
@@ -30,19 +23,14 @@ if uploaded_files:
     def process_image(file):
         image = Image.open(file)
 
-        # 🔄 이미지 리사이즈 (최적화)
-        max_size = (1600, 1600)
-        image.thumbnail(max_size)
-
+        # GPT OCR 분석
         result = extract_info_from_image(image, filename=file.name)
 
-        # 썸네일 생성
-        thumb = image.copy()
-        thumb.thumbnail((300, 300))
+        # 썸네일 base64 저장
         buffered = io.BytesIO()
-        thumb.save(buffered, format="PNG")
+        image.thumbnail((300, 300))
+        image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
         return {
             "파일명": file.name,
             "브랜드명": result.get("company", "N/A"),
@@ -65,38 +53,29 @@ if uploaded_files:
                 })
             progress.progress((i + 1) / len(uploaded_files))
 
-    # ✅ 테이블 출력
+    # ✅ 결과 표 (썸네일 팝업 + 표 복사 가능)
     st.success("✅ 분석 완료!")
-
-    st.markdown("""
-        <style>
-        .ocr-table {
-            border-collapse: collapse;
-            width: 100%;
-            font-size: 15px;
-        }
-        .ocr-table th, .ocr-table td {
-            border: 1px solid #ccc;
-            padding: 8px;
-            text-align: left;
-            vertical-align: middle;
-        }
-        .ocr-table th {
-            background-color: #f0f0f0;
-        }
-        .img-thumb {
-            height: 60px;
-            cursor: pointer;
-            transition: transform 0.2s ease;
-        }
-        .img-thumb:hover {
-            transform: scale(2);
-            z-index: 999;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown("아래 표를 엑셀에 복사해서 사용하실 수 있습니다.")
 
     table_html = """
+    <style>
+    .ocr-table { border-collapse: collapse; width: 100%; font-size: 15px; }
+    .ocr-table th, .ocr-table td {
+        border: 1px solid #ccc;
+        padding: 8px;
+        text-align: left;
+        vertical-align: middle;
+    }
+    .ocr-table th { background-color: #f0f0f0; }
+    .img-thumb {
+        height: 60px;
+        cursor: pointer;
+        border: 1px solid #999;
+        border-radius: 4px;
+        transition: transform 0.2s ease;
+    }
+    .img-thumb:hover { transform: scale(1.5); z-index: 1000; position: relative; }
+    </style>
     <table class='ocr-table'>
         <tr>
             <th>썸네일</th>
@@ -107,15 +86,8 @@ if uploaded_files:
     """
 
     for r in results:
-        img_tag = f"<img class='img-thumb' src='data:image/png;base64,{r['img_b64']}' title='클릭 시 확대'>" if r["img_b64"] else "N/A"
-        table_html += f"""
-        <tr>
-            <td>{img_tag}</td>
-            <td>{r['파일명']}</td>
-            <td>{r['브랜드명']}</td>
-            <td>{r['품번']}</td>
-        </tr>
-        """
+        image_tag = f"<img class='img-thumb' src='data:image/png;base64,{r['img_b64']}'>" if r["img_b64"] else "N/A"
+        table_html += f"<tr><td>{image_tag}</td><td>{r['파일명']}</td><td>{r['브랜드명']}</td><td>{r['품번']}</td></tr>"
 
     table_html += "</table>"
     st.markdown(table_html, unsafe_allow_html=True)
