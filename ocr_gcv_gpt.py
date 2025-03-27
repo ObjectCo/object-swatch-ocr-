@@ -57,9 +57,9 @@ def extract_info_with_gpt(raw_text: str) -> dict:
     prompt = f"""
 Below is OCR text from a fabric swatch image:
 
-"""
+\"\"\"
 {raw_text}
-"""
+\"\"\"
 
 From this text, extract:
 1. The brand name (e.g. HOKKOH, ALLBLUE Inc., Sojitz Fashion Co., Ltd.)
@@ -72,6 +72,7 @@ Return in this JSON format:
 If nothing is found, return:
 {{ "company": "N/A", "article_numbers": ["N/A"] }}
 """
+
 
     response = openai.chat.completions.create(
         model="gpt-4o",
