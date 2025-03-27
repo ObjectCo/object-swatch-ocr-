@@ -12,7 +12,7 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
 
-    if re.search(r"\\bHKKH?\\b|\\bHOKKH\\b|\\bHKH\\b", name):
+    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
         return "HOKKOH"
 
     if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
@@ -31,15 +31,15 @@ def is_valid_article(article, company=None):
     article = article.strip().upper()
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
         return False
-    if "OCA" in article and re.match(r"OCA\\d{3,}", article):
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):
         return False
     if article == company:
         return False
-    if re.fullmatch(r"C\\d{2,3}%?", article):
+    if re.fullmatch(r"C\d{2,3}%?", article):
         return False
-    if re.fullmatch(r"\\d{1,2}", article):
+    if re.fullmatch(r"\d{1,2}", article):
         return False
-    return re.search(r"\\d{3,}", article) is not None or re.match(r"[A-Z0-9\\-/#]{3,}", article)
+    return re.search(r"\d{3,}", article) is not None or re.match(r"[A-Z0-9\-/#]{3,}", article)
 
 # 이미지 리사이징
 def resize_image(image, max_size=(1600, 1600)):
@@ -87,7 +87,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             used_fallback = False
         except json.JSONDecodeError:
             used_fallback = True
-            company_match = re.search(r'"company"\\s*:\\s*"([^"]+)"', result_text)
+            company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
@@ -126,3 +126,4 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
