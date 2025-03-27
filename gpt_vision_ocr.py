@@ -8,35 +8,42 @@ import os
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
+# 브랜드 정규화 함수
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
-    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
+    if re.search(r"HKK|HKH|HKKH|HOKKH", name):
         return "HOKKOH"
     if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
         return "Sojitz Fashion Co., Ltd."
     if "LINGO" in name:
         return "Lingo"
+    if "MATSUBARA" in name:
+        return "Matsubara Co., Ltd."
     return name.title().replace("Co.,Ltd.", "Co., Ltd.")
 
+# 품번 유효성 필터
 def is_valid_article(article, company=None):
     article = article.strip().upper()
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
         return False
-    if "OCA" in article and re.match(r"OCA\d{3,}", article):
+    if re.search(r"OCA\d{3,}", article):  # OCA 시리즈 제거
         return False
-    if re.fullmatch(r"C\d{2,3}%?", article):  # 성분
+    if company and article == company.upper():
         return False
-    if re.fullmatch(r"\d{1,2}", article):  # 너무 짧은 숫자
+    if re.fullmatch(r"C\d{2,3}%?", article):
         return False
-    if company and article == company:
+    if re.fullmatch(r"\d{1,2}", article):
         return False
-    # 핵심 조건: 영문/숫자/기호 조합 4자 이상
-    return re.match(r"[A-Z0-9\-/#]{4,}", article) is not None
+    if article in ["80143", "HS2291"]:  # 알려진 잘못된 오탐 번호 제거
+        return False
+    return re.search(r"\d{3,}", article) or re.match(r"[A-Z]{2,10}[-/]?\d{3,}", article)
 
+# 이미지 리사이징
 def resize_image(image, max_size=(1600, 1600)):
     image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
+# 메인 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -44,27 +51,30 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        prompt_text = (
-            "You're a fabric OCR extraction model. Extract ONLY:\n"
-            "1. Brand name (e.g. Sojitz Fashion Co., Ltd., Lingo, HOKKOH)\n"
-            "2. Article number(s) (e.g. BD3991, LIG4020-RE, 2916)\n\n"
-            "Avoid:\n"
-            "- Phone numbers, FAX, URLs, addresses\n"
-            "- Colors or composition (C100%, Ny 100%)\n"
-            "- Ranges like 40031~33 (list them separately)\n\n"
-            "Return JSON only:\n"
-            "{ \"company\": \"BRAND\", \"article_numbers\": [\"CODE1\"] }\n"
-        )
+        # 간결하고 핵심 중심 프롬프트
+        prompt = """
+You're a fabric swatch analyzer.
+Extract the brand name (company) and article number(s) from the image.
+
+Guidelines:
+- Brand names include words like Co., Ltd., Inc., Textile, Fashion, etc.
+- Article numbers often appear after: ART NO., PRODUCT NO., ITEM NO., or inside angle brackets (e.g., <WD8909>)
+- Return clean JSON like:
+{ "company": "BRAND NAME", "article_numbers": ["CODE1", "CODE2"] }
+
+If not found:
+{ "company": "N/A", "article_numbers": ["N/A"] }
+        """.strip()
 
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                { "role": "system", "content": "You are a helpful assistant." },
+                {"role": "system", "content": "You are a helpful assistant."},
                 {
                     "role": "user",
                     "content": [
-                        { "type": "text", "text": prompt_text },
-                        { "type": "image_url", "image_url": { "url": f"data:image/png;base64,{img_b64}" } }
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
                     ]
                 }
             ],
@@ -73,14 +83,14 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # Fallback-safe 파싱
+        # JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
         except json.JSONDecodeError:
             used_fallback = True
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9\-/ #]{4,})"', result_text)
+            raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
@@ -94,13 +104,14 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             if is_valid_article(a, normalized_company)
         ]
 
+        # 브랜드명이 품번으로 포함된 경우 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
-            and (normalized_company.replace(" ", "") not in a.replace(" ", ""))
+            and normalized_company.replace(" ", "") not in a.replace(" ", "")
         ]
 
-        # 특수: hk 파일은 브랜드 고정
+        # hk 파일 예외 처리
         if filename and filename.lower().startswith("hk"):
             normalized_company = "HOKKOH"
             filtered_articles = [a for a in filtered_articles if a.upper() != "N/A"]
@@ -108,8 +119,8 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
                 filtered_articles = ["N/A"]
 
         return {
-            "company": normalized_company if normalized_company else "N/A",
-            "article_numbers": filtered_articles if filtered_articles else ["N/A"],
+            "company": normalized_company or "N/A",
+            "article_numbers": filtered_articles or ["N/A"],
             "used_fallback": used_fallback
         }
 
@@ -119,4 +130,3 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
-
