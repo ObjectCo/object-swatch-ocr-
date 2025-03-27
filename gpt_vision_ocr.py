@@ -1,120 +1,139 @@
-# ✅ GPT Vision 기반 원단 스와치 OCR 개선 버전
-# 정확도 98%를 목표로 한 정제된 로직
-
 import openai
 import base64
 import io
-from PIL import Image
-import os
 import json
 import re
+from PIL import Image
+import os
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-def encode_image(image: Image.Image) -> str:
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-def normalize_brand(name: str) -> str:
+# 브랜드 정규화 함수
+def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
-    if re.search(r"HKK|HKH|HKKH|HOKKH", name):
+
+    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
         return "HOKKOH"
-    if "SOJITZ" in name:
+
+    if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
         return "Sojitz Fashion Co., Ltd."
-    if "ALLBLUE" in name:
-        return "ALLBLUE Inc."
+
+    if "LINGO" in name:
+        return "Lingo"
+
     if "MATSUBARA" in name:
         return "Matsubara Co., Ltd."
-    if "KOMON" in name:
-        return "KOMON KOBO"
+
     if "YAGI" in name:
         return "YAGI"
-    return name.title()
 
-def is_valid_article(article: str) -> bool:
-    article = article.upper()
-    if any(keyword in article for keyword in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "OCA"]):
+    return name.title().replace("Co.,Ltd.", "Co., Ltd.")
+
+# 품번 유효성 필터
+def is_valid_article(article, company=None):
+    article = article.strip().upper()
+    if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
+        return False
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):
+        return False
+    if article == company:
+        return False
+    if re.fullmatch(r"C\d{2,3}%?", article):
         return False
     if re.fullmatch(r"\d{1,2}", article):
         return False
-    return bool(re.search(r"\d{3,}", article)) or bool(re.match(r"[A-Z0-9\-/#]{4,}", article))
+    return re.search(r"\d{3,}", article) is not None or re.match(r"[A-Z0-9\-/#]{3,}", article)
 
-def extract_info_from_image(image: Image.Image) -> dict:
+# 이미지 리사이징
+def resize_image(image, max_size=(1600, 1600)):
+    image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    return image
+
+# 메인 추출 함수
+def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
-        # Step 1: Get raw OCR text from image
-        img_b64 = encode_image(image)
-        vision_prompt = """
-        You are an OCR system. Extract all visible text from this fabric swatch image. 
-        Include brand names, article numbers, labels, and ignore visual noise.
-        """
+        image = resize_image(image)
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        vision_response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "user", "content": [
-                    {"type": "text", "text": vision_prompt.strip()},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
-                ]}
-            ],
-            max_tokens=1500
+        prompt_text = (
+            "You are a vision model for extracting fabric info from swatch images.\n\n"
+            "- Extract only the **brand name** (e.g., YAGI, Lingo, Sojitz Fashion Co., Ltd.) and **article number**.\n"
+            "- Article numbers look like: 253YGU0104, TXAB-H062, BD3991, etc.\n"
+            "- Prioritize text near the top-right of the image.\n"
+            "- Ignore phone numbers, addresses, colors, compositions, size, TEL/FAX.\n"
+            "- If the brand 'YAGI' appears top-left, set brand name as 'YAGI'.\n"
+            "- Return JSON format only:\n"
+            "{ \"company\": \"BRAND\", \"article_numbers\": [\"CODE1\"] }\n"
+            "- If not found, return: { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
         )
 
-        raw_text = vision_response.choices[0].message.content.strip()
-
-        # Step 2: Analyze that text to extract brand + article number
-        analyze_prompt = f"""
-        Below is raw OCR text from a fabric label:
-
-        {raw_text}
-
-        Extract:
-        1. Brand name (e.g. HOKKOH, ALLBLUE Inc., Sojitz Fashion Co., Ltd.)
-        2. Valid article numbers (e.g. BD3991, TXAB-H062, 253YGU0105, 2916)
-
-        Ignore TEL, FAX, OCA, Article, HTTP, WWW, Color, Composition, and any unrelated info.
-
-        Return strict JSON like:
-        {{ "company": "BRAND", "article_numbers": ["CODE1", "CODE2"] }}
-        If nothing is found, return:
-        {{ "company": "N/A", "article_numbers": ["N/A"] }}
-        """
-
-        analyze_response = openai.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "user", "content": analyze_prompt.strip()}
+                {"role": "system", "content": "You are a helpful assistant."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+                    ]
+                }
             ],
-            max_tokens=700
+            max_tokens=700,
         )
 
-        result_text = analyze_response.choices[0].message.content.strip()
+        result_text = response.choices[0].message.content.strip()
 
+        # JSON 파싱
         try:
             result = json.loads(result_text)
+            used_fallback = False
         except json.JSONDecodeError:
-            # fallback: extract with regex
+            used_fallback = True
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
-            article_matches = re.findall(r'"([A-Z0-9\-/#]{3,})"', result_text)
+            raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
             result = {
-                "company": company_match.group(1) if company_match else "N/A",
-                "article_numbers": list(set(article_matches)) if article_matches else ["N/A"]
+                "company": company_match.group(1).strip() if company_match else "N/A",
+                "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # Final cleanup
-        company = normalize_brand(result.get("company", "N/A"))
-        article_numbers = [a for a in result.get("article_numbers", []) if is_valid_article(a)]
+        raw_company = result.get("company", "N/A").strip()
+        normalized_company = normalize_company_name(raw_company)
 
-        if not article_numbers:
-            article_numbers = ["N/A"]
+        filtered_articles = [
+            a.strip() for a in result.get("article_numbers", [])
+            if is_valid_article(a, normalized_company)
+        ]
+
+        # 회사명이 품번에 중복된 경우 필터링
+        filtered_articles = [
+            a for a in filtered_articles
+            if a.upper() != normalized_company.upper()
+            and (normalized_company.replace(" ", "") not in a.replace(" ", ""))
+        ]
+
+        # YAGI 보정
+        if "YAGI" in raw_company.upper() or "YAGI" in result_text:
+            normalized_company = "YAGI"
+
+        # hk 파일명은 HOKKOH 보정 + N/A 품번 제거
+        if filename and filename.lower().startswith("hk"):
+            normalized_company = "HOKKOH"
+            filtered_articles = [a for a in filtered_articles if a.upper() != "N/A"]
+            if not filtered_articles:
+                filtered_articles = ["N/A"]
 
         return {
-            "company": company,
-            "article_numbers": article_numbers
+            "company": normalized_company if normalized_company else "N/A",
+            "article_numbers": filtered_articles if filtered_articles else ["N/A"],
+            "used_fallback": used_fallback
         }
 
     except Exception as e:
         return {
             "company": "[ERROR]",
-            "article_numbers": [f"[ERROR] {str(e)}"]
+            "article_numbers": [f"[ERROR] {str(e)}"],
+            "used_fallback": True
         }
