@@ -8,59 +8,46 @@ from gpt_vision_ocr import extract_info_from_image
 
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 
-st.markdown(
-    """
+# JS modal & style
+st.markdown("""
     <style>
-    .modal {{
-        display: none;
-        position: fixed;
-        z-index: 999;
-        padding-top: 60px;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        overflow: auto;
-        background-color: rgba(0,0,0,0.8);
-    }}
-    .modal-content {{
-        margin: auto;
-        display: block;
+    .modal {
+        display: none; position: fixed; z-index: 999;
+        padding-top: 60px; left: 0; top: 0;
+        width: 100%; height: 100%;
+        overflow: auto; background-color: rgba(0,0,0,0.8);
+    }
+    .modal-content {
+        margin: auto; display: block;
         max-width: 90%;
-    }}
-    .close {{
-        position: absolute;
-        top: 20px;
-        right: 35px;
-        color: #fff;
-        font-size: 40px;
-        font-weight: bold;
+    }
+    .close {
+        position: absolute; top: 20px; right: 35px;
+        color: #fff; font-size: 40px; font-weight: bold;
         cursor: pointer;
-    }}
-    .thumb {{
-        height: 45px;
-        cursor: pointer;
-    }}
+    }
+    .thumb {
+        height: 35px; cursor: pointer;
+    }
     </style>
     <script>
-    function showModal(imgSrc) {{
+    function showModal(imgSrc) {
         var modal = document.getElementById("imgModal");
         var modalImg = document.getElementById("modalImg");
         modal.style.display = "block";
         modalImg.src = imgSrc;
-    }}
-    function closeModal() {{
+    }
+    function closeModal() {
         document.getElementById("imgModal").style.display = "none";
-    }}
+    }
     </script>
     <div id="imgModal" class="modal">
         <span class="close" onclick="closeModal()">&times;</span>
         <img class="modal-content" id="modalImg">
     </div>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
+# 타이틀 및 로고
 st.image("https://object-tex.com/_nuxt/img/logo-black.40d9d15.svg", width=140)
 st.title("📦 Object Swatch OCR")
 st.markdown("이미지를 업로드하면 브랜드명과 품번을 자동 인식하여 리스트로 출력합니다.")
@@ -103,17 +90,17 @@ if uploaded_files:
     st.success("✅ 분석 완료!")
     st.markdown("아래 결과는 엑셀에 **복사 & 붙여넣기** 가능합니다.")
 
-    # 썸네일 테이블만 HTML로
-    thumbnail_html = "<table style='border-collapse: collapse; width: 100%; font-size: 14px;'>"
-    thumbnail_html += "<thead><tr><th>썸네일</th><th>파일명</th><th>브랜드명</th><th>품번</th></tr></thead><tbody>"
+    # 썸네일 포함 테이블 생성
+    html = "<table style='border-collapse: collapse; width: 100%; font-size: 14px;'>"
+    html += "<thead><tr><th>썸네일</th><th>파일명</th><th>브랜드명</th><th>품번</th></tr></thead><tbody>"
     for r in results:
-        thumbnail_html += f"<tr><td>{r['썸네일']}</td><td>{r['파일명']}</td><td>{r['브랜드명']}</td><td>{r['품번']}</td></tr>"
-    thumbnail_html += "</tbody></table>"
+        html += f"<tr><td>{r['썸네일']}</td><td>{r['파일명']}</td><td>{r['브랜드명']}</td><td>{r['품번']}</td></tr>"
+    html += "</tbody></table>"
 
-    # 와이드하게 출력
+    # 와이드 + 배경색 제거
     st.markdown(f"""
-        <div style='width: 100%; max-width: 100%; overflow-x: auto; background-color: #1e3e30; padding: 8px; border-radius: 6px;'>
-        {thumbnail_html}
+        <div style='width: 100%; max-width: 100%; overflow-x: auto; padding: 6px 0;'>
+        {html}
         </div>
     """, unsafe_allow_html=True)
 
