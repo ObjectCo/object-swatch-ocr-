@@ -8,32 +8,32 @@ import os
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# 브랜드명 정규화
-def normalize_company_name(name):
+# 브랜드 정규화
+def normalize_company_name(name, filename=None):
     name = name.upper()
-    if re.search(r"\bH(KK|KH|KKH|OKKH)\b", name):
+    if re.search(r"HKKH|HOKKH|HKK|HKH", name):
         return "HOKKOH"
-    return name.title().replace("Co.,Ltd.", "Co., Ltd.").replace("Co.,Ltd", "Co., Ltd.")
+    if filename and filename.lower().startswith("hk"):
+        return "HOKKOH"
+    return name.title().replace("Co.,Ltd.", "Co., Ltd.")
 
-# 품번 유효성 필터
+# 유효 품번 필터
 def is_valid_article(article):
     article = article.upper()
-    if article in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW", "OCA1234"]:
+    if article in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW"]:
         return False
-    if "OCA" in article and re.match(r"OCA\d{3,}", article):  # 하단 OCA 제거
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):  # 하단 작은 텍스트
         return False
-    if re.search(r"\d{3,}", article):  # 숫자 3자리 이상
+    if re.search(r"\d{3,}", article):  # 숫자 포함
         return True
     if re.match(r"[A-Z0-9\-/#]{3,}", article):
         return True
     return False
 
-# 이미지 리사이즈
 def resize_image(image, max_size=(1600, 1600)):
     image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
-# 메인 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -44,25 +44,28 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         prompt = (
             "You're an OCR assistant. Extract only the fabric swatch's brand (company name) and article number(s).\n"
-            "- Brand names include Co., Ltd., TEXTILE, Inc., etc.\n"
-            "- Article numbers include: BD3991, TXAB-H062, KYC 424-W D/#3, 103, etc.\n"
-            "- JSON format only: { \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", ...] }\n"
-            "- No extra text. If not found, return: { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
+            "- Company names may include: Co.,Ltd., TEXTILE, Inc., 株式会社, etc.\n"
+            "- Article numbers usually look like: BD3991, TXAB-H062, KYC 424-W D/#3, 103, etc.\n"
+            "- Return multiple article numbers if needed.\n"
+            "- Output JSON ONLY:\n"
+            "{ \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
+            "- If not found, return:\n"
+            "{ \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
         )
 
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                { "role": "system", "content": "You are a helpful assistant." },
+                {"role": "system", "content": "You are a helpful assistant."},
                 {
                     "role": "user",
                     "content": [
-                        { "type": "text", "text": prompt },
-                        { "type": "image_url", "image_url": { "url": f"data:image/png;base64,{img_b64}" } }
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
                     ]
                 }
             ],
-            max_tokens=600,
+            max_tokens=700
         )
 
         result_text = response.choices[0].message.content.strip()
@@ -70,8 +73,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         # JSON 파싱
         try:
             result = json.loads(result_text)
-        except json.JSONDecodeError:
-            # fallback-safe parsing
+        except:
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
             result = {
@@ -79,20 +81,23 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # 정제
-        articles = [
+        # 브랜드 정규화
+        result["company"] = normalize_company_name(result.get("company", ""), filename)
+
+        # 품번 정제
+        article_numbers = [
             a.strip() for a in result.get("article_numbers", []) if is_valid_article(a)
         ]
-        if not articles:
-            if filename and filename.lower().startswith("hk"):
-                articles = []  # hk 이미지에선 N/A 제거
-            else:
-                articles = ["N/A"]
-        result["article_numbers"] = articles
 
-        # 브랜드명 정규화
-        company = result.get("company", "")
-        result["company"] = normalize_company_name(company) if company else "N/A"
+        if filename and filename.lower().startswith("hk"):
+            if article_numbers:
+                result["company"] = "HOKKOH"
+                result["article_numbers"] = article_numbers
+            else:
+                result["company"] = "HOKKOH"
+                result["article_numbers"] = []
+        else:
+            result["article_numbers"] = article_numbers if article_numbers else ["N/A"]
 
         return result
 
@@ -101,4 +106,5 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "company": "[ERROR]",
             "article_numbers": [f"[ERROR] {str(e)}"]
         }
+
 
