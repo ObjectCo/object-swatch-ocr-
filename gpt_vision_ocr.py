@@ -8,17 +8,21 @@ import os
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# 브랜드명 정규화 함수
-def normalize_company_name(name):
+# 브랜드 정규화 함수
+def normalize_company_name(name, filename=None):
     name = name.upper()
     if re.search(r"HKK|HKH|HKKH|HOKKH", name):
         return "HOKKOH"
-    return name.title().replace("Co.,Ltd.", "Co., Ltd.").replace("Co.,ltd.", "Co., Ltd.")
+    if filename and filename.lower().startswith("hk"):
+        return "HOKKOH"
+    return name.title().replace("Co.,Ltd.", "Co., Ltd.").replace("Matsubara.Co.,Ltd", "MATSUBARA CO.,LTD")
 
-# 품번 유효성 검사
+# 품번 유효성 필터
 def is_valid_article(article):
     article = article.upper()
     if article in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW"]:
+        return False
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):  # OCA로 시작하는 하단 품번 제거
         return False
     if re.search(r"\d{3,}", article):  # 숫자 3자리 이상 포함
         return True
@@ -26,16 +30,16 @@ def is_valid_article(article):
         return True
     return False
 
-def extract_info_from_image(image: Image.Image) -> dict:
-    try:
-        # ✅ 리사이징: 1600px 이하로 축소 (속도 향상)
-        max_width = 1600
-        if image.width > max_width:
-            ratio = max_width / float(image.width)
-            new_height = int((float(image.height) * float(ratio)))
-            image = image.resize((max_width, new_height))
+# 이미지 리사이징 함수
+def resize_image(image, max_size=(1600, 1600)):
+    image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    return image
 
-        # 이미지 → base64 인코딩
+# GPT Vision OCR 추출 함수
+def extract_info_from_image(image: Image.Image, filename=None) -> dict:
+    try:
+        image = resize_image(image)
+
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -64,16 +68,15 @@ def extract_info_from_image(image: Image.Image) -> dict:
                     ]
                 }
             ],
-            max_tokens=700,
+            max_tokens=600,
         )
 
         result_text = response.choices[0].message.content.strip()
 
-        # 1차: JSON 응답 시도
+        # JSON 파싱
         try:
             result = json.loads(result_text)
         except json.JSONDecodeError:
-            # fallback: 정규표현식 수동 추출
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
             result = {
@@ -81,12 +84,13 @@ def extract_info_from_image(image: Image.Image) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # 품번 필터링 및 브랜드 정규화
         result["article_numbers"] = [
             a.strip() for a in result.get("article_numbers", []) if is_valid_article(a)
-        ] or ["N/A"]
+        ]
+        if not result["article_numbers"]:
+            result["article_numbers"] = ["N/A"]
 
-        result["company"] = normalize_company_name(result.get("company", "N/A"))
+        result["company"] = normalize_company_name(result.get("company", ""), filename)
 
         return result
 
