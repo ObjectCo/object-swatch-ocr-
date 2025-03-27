@@ -112,3 +112,4 @@ def extract_info_from_image(image: Image.Image) -> dict:
         return extract_info_with_gpt(raw_text)
     except Exception as e:
         return {"company": "[ERROR]", "article_numbers": [f"[ERROR] {str(e)}"]}
+
