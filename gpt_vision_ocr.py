@@ -11,27 +11,40 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 # 브랜드 정규화 함수
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
+
+    # HOKKOH 오탐 패턴
     if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
         return "HOKKOH"
-    if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
+
+    # Sojitz 오탐 패턴
+    if re.search(r"S[AE]?J[IU]?T[ZX]?", name):  # Septex, Sajtex, Sujin, Sojitz, Sajta 등
         return "Sojitz Fashion Co., Ltd."
+
+    # Lingo
     if "LINGO" in name:
         return "Lingo"
+
     return name.title().replace("Co.,Ltd.", "Co., Ltd.")
 
 # 품번 유효성 필터
 def is_valid_article(article, company=None):
     article = article.strip().upper()
+
+    # 제거 대상
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
         return False
-    if "OCA" in article and re.match(r"OCA\d{3,}", article):
+    if re.fullmatch(r"\d{1,2}", article):  # 1~2자리 숫자 제거 (ex: 컬러번호)
+        return False
+    if re.match(r"^\d{1,2}-[A-Z0-9]+", article):  # 컬러번호 패턴 (예: 20-T0176)
+        return False
+    if re.fullmatch(r"C\d{2,3}%?", article):  # C100% 같은 성분 정보 제거
         return False
     if article == company:
         return False
-    if re.fullmatch(r"C\d{2,3}%?", article):
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):
         return False
-    if re.fullmatch(r"\d{1,2}", article):
-        return False
+
+    # 유효 품번 조건
     return re.search(r"\d{3,}", article) is not None or re.match(r"[A-Z0-9\-/#]{3,}", article)
 
 # 이미지 리사이징
@@ -82,7 +95,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -98,17 +110,20 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
-        # 품번 필터링
+        # 품번 정제
         filtered_articles = [
             a.strip() for a in result.get("article_numbers", [])
             if is_valid_article(a, normalized_company)
         ]
+
+        # 브랜드명이 품번으로 포함된 경우 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
             and (normalized_company.replace(" ", "") not in a.replace(" ", ""))
         ]
 
+        # 특수 케이스: hk 파일은 브랜드명 강제 HOKKOH
         if filename and filename.lower().startswith("hk"):
             normalized_company = "HOKKOH"
             filtered_articles = [a for a in filtered_articles if a.upper() != "N/A"]
