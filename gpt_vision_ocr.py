@@ -8,12 +8,11 @@ import os
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# 브랜드 정규화
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
     if "YAGI" in name:
         return "YAGI"
-    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
+    if re.search(r"\\bHKKH?\\b|\\bHOKKH\\b|\\bHKH\\b", name):
         return "HOKKOH"
     if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
         return "Sojitz Fashion Co., Ltd."
@@ -25,25 +24,22 @@ def normalize_company_name(name: str) -> str:
         return "Lingo"
     return name.title().replace("Co.,Ltd.", "Co., Ltd.")
 
-# 품번 유효성 필터링
 def is_valid_article(article, company=None):
     article = article.strip().upper()
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
         return False
-    if "OCA" in article and re.match(r"OCA\d{3,}", article):
+    if "OCA" in article and re.match(r"OCA\\d{3,}", article):
         return False
     if company and article.upper() == company.upper():
         return False
-    if re.fullmatch(r"\d{1,2}", article):  # 너무 짧은 숫자
+    if re.fullmatch(r"\\d{1,2}", article):
         return False
-    return re.search(r"\d{3,}", article) is not None or re.match(r"[A-Z0-9\-/#]{3,}", article)
+    return re.search(r"[A-Z0-9\\-/#]{3,}", article) is not None
 
-# 이미지 리사이즈
 def resize_image(image: Image.Image, max_size=(1600, 1600)):
     image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
-# 핵심 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -54,12 +50,11 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         prompt_text = (
             "You are an expert OCR model for extracting fabric swatch info.\n"
             "- Extract the exact 'brand name' (e.g., YAGI, ALLBLUE Inc., HOKKOH).\n"
-            "- Extract the correct 'article number' such as AB-EX880, TXAB-H062, 253YGU0105 etc.\n"
-            "- Prioritize the top-right sticker for article numbers.\n"
-            "- Remove any phone numbers, TEL/FAX, website, 'ARTICLE' or text like 'Composition', 'Color', etc.\n"
-            "- Return only the valid brand and code in this JSON:\n"
+            "- ONLY extract the article number from the top-right label box under 'No.' or 'Article'.\n"
+            "- Ignore TEL/FAX, phone numbers, composition, color, website URLs, and anything not in top-right label.\n"
+            "- Return JSON in this format:\n"
             "{ \"company\": \"BRAND\", \"article_numbers\": [\"CODE1\"] }\n"
-            "- If none found, return: { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
+            "- If no valid info, return: { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }"
         )
 
         response = openai.chat.completions.create(
@@ -79,14 +74,14 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
         except json.JSONDecodeError:
             used_fallback = True
-            company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
+            company_match = re.search(r'"company"\\s*:\\s*"([^"]+)"', result_text)
+            raw_articles = re.findall(r'AB-EX\\d{3,}(?:REA)?', result_text) or \
+                           re.findall(r'[A-Z0-9]{2,}-[A-Z0-9/#]{2,}', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
@@ -100,18 +95,16 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             if is_valid_article(a, normalized_company)
         ]
 
-        # 중복 제거 및 브랜드명 중복 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "") not in a.replace(" ", "")
+            and "/" not in a and a.upper() != "N/A"
         ]
 
-        # 예외 케이스: 브랜드명이 없고 파일명이 hk로 시작
         if filename and filename.lower().startswith("hk"):
             if normalized_company == "N/A":
                 normalized_company = "HOKKOH"
-            filtered_articles = [a for a in filtered_articles if a.upper() != "N/A"]
 
         return {
             "company": normalized_company if normalized_company else "N/A",
