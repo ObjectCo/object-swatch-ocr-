@@ -42,13 +42,18 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         prompt_text = (
-            "You're an OCR assistant. Extract only the fabric swatch's brand (company name) and article number(s).\n"
-            "- Company names may include: Co.,Ltd., TEXTILE, Inc., 株式会社, etc.\n"
-            "- Article numbers look like: BD3991, TXAB-H062, KYC 424-W D/#3, 103, etc.\n"
-            "- Multiple articles should be returned in a list.\n"
-            "- Format: { \"company\": \"<Brand>\", \"article_numbers\": [\"<article1>\", \"<article2>\"] }\n"
-            "- If nothing is found: { \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }\n"
-            "- NO explanation or other content."
+            "You're a fabric OCR extraction model. Extract only the 'Brand name (company)' and 'Article number(s)'.\n\n"
+            "- The brand name (company) can include keywords like Co.,Ltd., Co., Ltd., Inc., TEXTILE, Fashion, Company, etc.\n"
+            "- The article numbers usually appear near the top, in formats like: BD3991, TXAB-H062, KYC 424-W D/#3, 2916, LIG4020-RE, etc.\n"
+            "- DO NOT include anything that looks like phone numbers, addresses, TEL, FAX, URLs, or color names.\n"
+            "- DO NOT extract any number or text from bottom-left or bottom-right of the image unless clearly a product code.\n"
+            "- DO NOT return ranges or multi-line values (like 'OSDC40031~33'), instead return each code individually.\n"
+            "- Remove all duplicates or invalid entries.\n\n"
+            "Return ONLY in JSON format like below:\n"
+            "{ \"company\": \"BRAND NAME\", \"article_numbers\": [\"CODE1\", \"CODE2\"] }\n\n"
+            "If not found, return:\n"
+            "{ \"company\": \"N/A\", \"article_numbers\": [\"N/A\"] }\n"
+            "No other text or explanation."
         )
 
         response = openai.chat.completions.create(
