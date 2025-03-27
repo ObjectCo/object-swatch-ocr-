@@ -30,19 +30,8 @@ st.markdown("""
         height: 35px; cursor: pointer;
     }
     </style>
-    <script>
-    function showModal(imgSrc) {
-        var modal = document.getElementById("imgModal");
-        var modalImg = document.getElementById("modalImg");
-        modal.style.display = "block";
-        modalImg.src = imgSrc;
-    }
-    function closeModal() {
-        document.getElementById("imgModal").style.display = "none";
-    }
-    </script>
     <div id="imgModal" class="modal">
-        <span class="close" onclick="closeModal()">&times;</span>
+        <span class="close" onclick="document.getElementById('imgModal').style.display='none'">&times;</span>
         <img class="modal-content" id="modalImg">
     </div>
 """, unsafe_allow_html=True)
@@ -66,8 +55,24 @@ if uploaded_files:
         image.save(buffered, format="PNG")
         img_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
         result = extract_info_from_image(image, filename=i_file.name)
+        unique_id = i_file.name.replace(".", "").replace(" ", "").replace("/", "_")
         return {
-            "썸네일": f"<img class='thumb' src='data:image/png;base64,{img_data}' onclick=\"showModal('data:image/png;base64,{img_data}')\">",
+            "썸네일": f"""
+                <div>
+                    <img class='thumb' id='thumb-{unique_id}' src='data:image/png;base64,{img_data}'>
+                    <script>
+                        const thumbElem = document.getElementById("thumb-{unique_id}");
+                        if (thumbElem) {{
+                            thumbElem.addEventListener("click", () => {{
+                                const modal = document.getElementById("imgModal");
+                                const modalImg = document.getElementById("modalImg");
+                                modal.style.display = "block";
+                                modalImg.src = "data:image/png;base64,{img_data}";
+                            }});
+                        }}
+                    </script>
+                </div>
+            """,
             "파일명": i_file.name,
             "브랜드명": result.get("company", "N/A"),
             "품번": ", ".join(result.get("article_numbers", []))
@@ -90,14 +95,14 @@ if uploaded_files:
     st.success("✅ 분석 완료!")
     st.markdown("아래 결과는 엑셀에 **복사 & 붙여넣기** 가능합니다.")
 
-    # 썸네일 포함 테이블 생성
+    # HTML 테이블 생성
     html = "<table style='border-collapse: collapse; width: 100%; font-size: 14px;'>"
     html += "<thead><tr><th>썸네일</th><th>파일명</th><th>브랜드명</th><th>품번</th></tr></thead><tbody>"
     for r in results:
         html += f"<tr><td>{r['썸네일']}</td><td>{r['파일명']}</td><td>{r['브랜드명']}</td><td>{r['품번']}</td></tr>"
     html += "</tbody></table>"
 
-    # 와이드 + 배경색 제거
+    # 테이블 렌더링
     st.markdown(f"""
         <div style='width: 100%; max-width: 100%; overflow-x: auto; padding: 6px 0;'>
         {html}
