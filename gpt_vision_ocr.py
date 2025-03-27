@@ -13,10 +13,29 @@ def normalize_company_name(name):
     name = name.upper()
     if re.search(r"HKK|HKH|HKKH|HOKKH", name):
         return "HOKKOH"
-    return name.title().replace("Co.,Ltd.", "Co., Ltd.")
+    return name.title().replace("Co.,Ltd.", "Co., Ltd.").replace("Co.,ltd.", "Co., Ltd.")
+
+# 품번 유효성 검사
+def is_valid_article(article):
+    article = article.upper()
+    if article in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW"]:
+        return False
+    if re.search(r"\d{3,}", article):  # 숫자 3자리 이상 포함
+        return True
+    if re.match(r"[A-Z0-9\-/#]{3,}", article):
+        return True
+    return False
 
 def extract_info_from_image(image: Image.Image) -> dict:
     try:
+        # ✅ 리사이징: 1600px 이하로 축소 (속도 향상)
+        max_width = 1600
+        if image.width > max_width:
+            ratio = max_width / float(image.width)
+            new_height = int((float(image.height) * float(ratio)))
+            image = image.resize((max_width, new_height))
+
+        # 이미지 → base64 인코딩
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -45,16 +64,16 @@ def extract_info_from_image(image: Image.Image) -> dict:
                     ]
                 }
             ],
-            max_tokens=600,
+            max_tokens=700,
         )
 
         result_text = response.choices[0].message.content.strip()
 
-        # JSON 파싱 시도
+        # 1차: JSON 응답 시도
         try:
             result = json.loads(result_text)
         except json.JSONDecodeError:
-            # fallback 파싱
+            # fallback: 정규표현식 수동 추출
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
             raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
             result = {
@@ -62,26 +81,12 @@ def extract_info_from_image(image: Image.Image) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # 추가 정제 로직
-        def is_valid_article(article):
-            if article.upper() in ["ARTICLE", "TEL", "FAX", "HTTP", "WWW"]:
-                return False
-            if re.search(r"\d{3,}", article):  # 숫자 3자리 이상 포함
-                return True
-            if re.match(r"[A-Z0-9\-/#]{3,}", article):
-                return True
-            return False
-
+        # 품번 필터링 및 브랜드 정규화
         result["article_numbers"] = [
             a.strip() for a in result.get("article_numbers", []) if is_valid_article(a)
-        ]
-        if not result["article_numbers"]:
-            result["article_numbers"] = ["N/A"]
+        ] or ["N/A"]
 
-        if result.get("company"):
-            result["company"] = normalize_company_name(result["company"])
-        else:
-            result["company"] = "N/A"
+        result["company"] = normalize_company_name(result.get("company", "N/A"))
 
         return result
 
