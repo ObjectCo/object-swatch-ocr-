@@ -4,7 +4,7 @@ from PIL import Image
 import io
 import base64
 import concurrent.futures
-from gpt_vision_ocr.py import extract_info_from_image
+from gpt_vision_ocr import extract_info_from_image
 
 st.set_page_config(page_title="Object Swatch OCR", layout="wide")
 
