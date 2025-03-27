@@ -141,12 +141,3 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
-'''
-
-# Save as file
-with open("/mnt/data/gpt_vision_ocr.py", "w") as f:
-    f.write(code.strip())
-
-"/mnt/data/gpt_vision_ocr.py"
-
-
