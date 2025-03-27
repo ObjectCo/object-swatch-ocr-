@@ -1,125 +1,120 @@
+# ✅ GPT Vision 기반 원단 스와치 OCR 개선 버전
+# 정확도 98%를 목표로 한 정제된 로직
+
 import openai
 import base64
 import io
-import json
-import re
 from PIL import Image
 import os
+import json
+import re
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-def normalize_company_name(name: str) -> str:
+def encode_image(image: Image.Image) -> str:
+    buffered = io.BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+def normalize_brand(name: str) -> str:
     name = name.strip().upper()
-    if "YAGI" in name:
-        return "YAGI"
-    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
+    if re.search(r"HKK|HKH|HKKH|HOKKH", name):
         return "HOKKOH"
-    if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
+    if "SOJITZ" in name:
         return "Sojitz Fashion Co., Ltd."
     if "ALLBLUE" in name:
         return "ALLBLUE Inc."
     if "MATSUBARA" in name:
         return "Matsubara Co., Ltd."
-    if "LINGO" in name:
-        return "Lingo"
-    return name.title().replace("Co.,Ltd.", "Co., Ltd.")
+    if "KOMON" in name:
+        return "KOMON KOBO"
+    if "YAGI" in name:
+        return "YAGI"
+    return name.title()
 
-def is_valid_article(article, company=None):
-    article = article.strip().upper()
-    if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
-        return False
-    if "OCA" in article and re.match(r"OCA\d{3,}", article):
-        return False
-    if company and article.upper() == company.upper():
+def is_valid_article(article: str) -> bool:
+    article = article.upper()
+    if any(keyword in article for keyword in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "OCA"]):
         return False
     if re.fullmatch(r"\d{1,2}", article):
         return False
-    return re.search(r"\d{3,}", article) is not None or re.match(r"[A-Z0-9\-/#]{3,}", article)
+    return bool(re.search(r"\d{3,}", article)) or bool(re.match(r"[A-Z0-9\-/#]{4,}", article))
 
-def resize_image(image: Image.Image, max_size=(1600, 1600)):
-    image.thumbnail(max_size, Image.Resampling.LANCZOS)
-    return image
-
-def extract_info_from_image(image: Image.Image, filename=None) -> dict:
+def extract_info_from_image(image: Image.Image) -> dict:
     try:
-        image = resize_image(image)
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        # Step 1: Get raw OCR text from image
+        img_b64 = encode_image(image)
+        vision_prompt = """
+        You are an OCR system. Extract all visible text from this fabric swatch image. 
+        Include brand names, article numbers, labels, and ignore visual noise.
+        """
 
-        prompt_text = """
-You are a precise OCR system. Extract only the following from the fabric swatch image:
-
-1. Exact **brand name** (e.g., YAGI, ALLBLUE Inc., HOKKOH, Sojitz Fashion Co., Ltd.).
-2. Valid **article number(s)** (e.g., AB-EX880, TXAB-H062, 253YGU0105). Prioritize values in the top-right label.
-3. Remove all unrelated info (e.g., TEL, FAX, websites, 'Composition', 'Article', 'Color', etc).
-
-Return the result as strict JSON like:
-{ "company": "BRAND", "article_numbers": ["CODE1", "CODE2"] }
-
-If nothing is found, return:
-{ "company": "N/A", "article_numbers": ["N/A"] }
-"""
-
-        response = openai.chat.completions.create(
+        vision_response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text.strip()},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
-                    ]
-                }
+                {"role": "user", "content": [
+                    {"type": "text", "text": vision_prompt.strip()},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+                ]}
             ],
-            max_tokens=700,
+            max_tokens=1500
         )
 
-        result_text = response.choices[0].message.content.strip()
+        raw_text = vision_response.choices[0].message.content.strip()
 
-        # Try parsing JSON directly
+        # Step 2: Analyze that text to extract brand + article number
+        analyze_prompt = f"""
+        Below is raw OCR text from a fabric label:
+
+        {raw_text}
+
+        Extract:
+        1. Brand name (e.g. HOKKOH, ALLBLUE Inc., Sojitz Fashion Co., Ltd.)
+        2. Valid article numbers (e.g. BD3991, TXAB-H062, 253YGU0105, 2916)
+
+        Ignore TEL, FAX, OCA, Article, HTTP, WWW, Color, Composition, and any unrelated info.
+
+        Return strict JSON like:
+        {{ "company": "BRAND", "article_numbers": ["CODE1", "CODE2"] }}
+        If nothing is found, return:
+        {{ "company": "N/A", "article_numbers": ["N/A"] }}
+        """
+
+        analyze_response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "user", "content": analyze_prompt.strip()}
+            ],
+            max_tokens=700
+        )
+
+        result_text = analyze_response.choices[0].message.content.strip()
+
         try:
             result = json.loads(result_text)
-            used_fallback = False
         except json.JSONDecodeError:
-            used_fallback = True
+            # fallback: extract with regex
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
+            article_matches = re.findall(r'"([A-Z0-9\-/#]{3,})"', result_text)
             result = {
-                "company": company_match.group(1).strip() if company_match else "N/A",
-                "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
+                "company": company_match.group(1) if company_match else "N/A",
+                "article_numbers": list(set(article_matches)) if article_matches else ["N/A"]
             }
 
-        raw_company = result.get("company", "N/A").strip()
-        normalized_company = normalize_company_name(raw_company)
+        # Final cleanup
+        company = normalize_brand(result.get("company", "N/A"))
+        article_numbers = [a for a in result.get("article_numbers", []) if is_valid_article(a)]
 
-        filtered_articles = [
-            a.strip() for a in result.get("article_numbers", [])
-            if is_valid_article(a, normalized_company)
-        ]
-
-        # Remove brand name from article number (e.g., ALLBLUE Inc. -> AB-EX880ALLBLUE → 제거)
-        filtered_articles = [
-            a for a in filtered_articles
-            if a.upper() != normalized_company.upper()
-            and normalized_company.replace(" ", "") not in a.replace(" ", "")
-        ]
-
-        if filename and filename.lower().startswith("hk"):
-            if normalized_company == "N/A":
-                normalized_company = "HOKKOH"
-            filtered_articles = [a for a in filtered_articles if a.upper() != "N/A"]
+        if not article_numbers:
+            article_numbers = ["N/A"]
 
         return {
-            "company": normalized_company if normalized_company else "N/A",
-            "article_numbers": filtered_articles if filtered_articles else ["N/A"],
-            "used_fallback": used_fallback
+            "company": company,
+            "article_numbers": article_numbers
         }
 
     except Exception as e:
         return {
             "company": "[ERROR]",
-            "article_numbers": [f"[ERROR] {str(e)}"],
-            "used_fallback": True
+            "article_numbers": [f"[ERROR] {str(e)}"]
         }
