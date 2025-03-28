@@ -11,10 +11,6 @@ from dotenv import load_dotenv
 if os.environ.get("ENV") != "production":
     load_dotenv(dotenv_path=".env")
 
-# ✅ API 키 설정
-openai.api_key = os.environ.get("OPENAI_API_KEY")
-
-
 # ✅ 브랜드 정규화
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
