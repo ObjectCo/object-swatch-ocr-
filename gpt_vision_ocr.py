@@ -5,8 +5,9 @@ import json
 import re
 from PIL import Image
 import os
-from dotenv import load_dotenv  # ✅ 추가
-load_dotenv()                   # ✅ 추가
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="/Users/object/object-swatch-ocr-/.env")
+
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
