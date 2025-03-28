@@ -5,6 +5,8 @@ import json
 import re
 from PIL import Image
 import os
+from dotenv import load_dotenv  # ✅ 추가
+load_dotenv()                   # ✅ 추가
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
