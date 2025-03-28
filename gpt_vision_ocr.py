@@ -11,11 +11,7 @@ from dotenv import load_dotenv
 if os.environ.get("ENV") != "production":
     load_dotenv(dotenv_path=".env")  # 로컬 상대 경로
 
-openai.api_key = os.environ.get("OPENAI_KEY")
-
-
-
-openai.api_key = os.environ.get("OPENAI_KEY")
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 
 # 브랜드 정규화 함수
