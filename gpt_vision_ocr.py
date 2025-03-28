@@ -57,8 +57,11 @@ def resize_image(image, max_size=(1600, 1600)):
 
 # 메인 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
-    import openai, base64, io, json, re
+    import openai, base64, io, json, re, os
     from PIL import Image
+
+    # ✅ 반드시 포함!
+    openai.api_key = os.environ.get("OPENAI_API_KEY")
 
     def normalize_company_name(name: str) -> str:
         name = name.strip().upper()
@@ -78,7 +81,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
     def is_valid_article(article: str, company=None) -> bool:
         article = article.strip().upper()
-        # 필터링 단어
         if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "COMPOSITION"]:
             return False
         if "OCA" in article and re.match(r"OCA\d{3,}", article):
@@ -133,7 +135,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # GPT JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -154,14 +155,12 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             if is_valid_article(a, normalized_company)
         ]
 
-        # 품번에서 브랜드명 포함된 경우 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
         ]
 
-        # fallback 시 회사명이 없어도 품번 유효하면 유지
         return {
             "company": normalized_company if normalized_company else "N/A",
             "article_numbers": filtered_articles if filtered_articles else ["N/A"],
@@ -174,4 +173,3 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
-
