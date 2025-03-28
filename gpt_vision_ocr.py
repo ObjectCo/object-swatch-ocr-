@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path="/Users/object/object-swatch-ocr-/.env")
 
 
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+openai.api_key = os.environ.get("GEMINI_API_KEY")
+
 
 # 브랜드 정규화 함수
 def normalize_company_name(name: str) -> str:
