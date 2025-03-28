@@ -3,106 +3,67 @@ import base64
 import io
 import json
 import re
-from PIL import Image
 import os
+from PIL import Image
 from dotenv import load_dotenv
 
-# 로컬에서는 .env 로드 (Cloud Run은 무시됨)
+# ✅ .env 환경변수 로드
 if os.environ.get("ENV") != "production":
-    load_dotenv(dotenv_path=".env")  # 로컬 상대 경로
+    load_dotenv(dotenv_path=".env")
 
+# ✅ API 키 설정
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 
-# 브랜드 정규화 함수
+# ✅ 브랜드 정규화
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
-
-    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
+    if re.search(r"HKKH?|HOKKH|HKH", name):
         return "HOKKOH"
-
-    if re.search(r"S[AE]?J[IU]?T[ZX]?", name):
+    if "KOMON KOBO" in name or "小紋工房" in name:
+        return "Uni Textile Co., Ltd."
+    if "SOJITZ" in name:
         return "Sojitz Fashion Co., Ltd."
-
-    if "LINGO" in name:
-        return "Lingo"
-
+    if "ALLBLUE" in name:
+        return "ALLBLUE Inc."
     if "MATSUBARA" in name:
         return "Matsubara Co., Ltd."
-
     if "YAGI" in name:
         return "YAGI"
-
     return name.title().replace("Co.,Ltd.", "Co., Ltd.")
 
-# 품번 유효성 필터
-def is_valid_article(article, company=None):
+
+# ✅ 품번 유효성 필터
+def is_valid_article(article: str, company=None) -> bool:
     article = article.strip().upper()
-    if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE"]:
+    if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "COMPOSITION"]:
         return False
     if "OCA" in article and re.match(r"OCA\d{3,}", article):
         return False
     if article == company:
         return False
-    if re.fullmatch(r"C\d{2,3}%?", article):
-        return False
     if re.fullmatch(r"\d{1,2}", article):
         return False
-    return re.search(r"\d{3,}", article) is not None or re.match(r"[A-Z0-9\-/#]{3,}", article)
+    if re.fullmatch(r"C\d{2,3}%?", article):
+        return False
+    return bool(re.search(r"[A-Z0-9\-/#]{3,}", article)) or bool(re.search(r"\d{3,}", article))
 
-# 이미지 리사이징
+
+# ✅ 이미지 리사이즈
 def resize_image(image, max_size=(1600, 1600)):
     image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
-# 메인 추출 함수
+
+# ✅ 메인 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
-    import openai, base64, io, json, re, os
-    from PIL import Image
-
-    # ✅ 반드시 포함!
-    openai.api_key = os.environ.get("OPENAI_API_KEY")
-
-    def normalize_company_name(name: str) -> str:
-        name = name.strip().upper()
-        if re.search(r"HKKH?|HOKKH|HKH", name):
-            return "HOKKOH"
-        if "KOMON KOBO" in name or "小紋工房" in name:
-            return "Uni Textile Co., Ltd."
-        if "SOJITZ" in name:
-            return "Sojitz Fashion Co., Ltd."
-        if "ALLBLUE" in name:
-            return "ALLBLUE Inc."
-        if "MATSUBARA" in name:
-            return "Matsubara Co., Ltd."
-        if "YAGI" in name:
-            return "YAGI"
-        return name.title().replace("Co.,Ltd.", "Co., Ltd.")
-
-    def is_valid_article(article: str, company=None) -> bool:
-        article = article.strip().upper()
-        if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "COMPOSITION"]:
-            return False
-        if "OCA" in article and re.match(r"OCA\d{3,}", article):
-            return False
-        if article == company:
-            return False
-        if re.fullmatch(r"\d{1,2}", article):
-            return False
-        if re.fullmatch(r"C\d{2,3}%?", article):
-            return False
-        return bool(re.search(r"[A-Z0-9\-/#]{3,}", article)) or bool(re.search(r"\d{3,}", article))
-
-    def resize_image(image, max_size=(1600, 1600)):
-        image.thumbnail(max_size, Image.Resampling.LANCZOS)
-        return image
-
     try:
         image = resize_image(image)
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+        # 🧠 GPT 프롬프트
         prompt_text = (
             "You are an expert OCR system for fabric swatch images.\n"
             "Extract ONLY:\n"
@@ -118,6 +79,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "- If not found, use N/A"
         )
 
+        # GPT Vision 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -135,6 +97,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
+        # ✅ JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -147,14 +110,17 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
+        # 브랜드 정규화
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
+        # 품번 필터링
         filtered_articles = [
             a.strip() for a in result.get("article_numbers", [])
             if is_valid_article(a, normalized_company)
         ]
 
+        # 브랜드명 중복 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
@@ -173,3 +139,4 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
