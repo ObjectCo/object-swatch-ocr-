@@ -6,7 +6,13 @@ import re
 from PIL import Image
 import os
 from dotenv import load_dotenv
-load_dotenv(dotenv_path="/Users/object/object-swatch-ocr-/.env")
+
+# 로컬에서는 .env 로드 (Cloud Run은 무시됨)
+if os.environ.get("ENV") != "production":
+    load_dotenv(dotenv_path=".env")  # 로컬 상대 경로
+
+openai.api_key = os.environ.get("OPENAI_KEY")
+
 
 
 openai.api_key = os.environ.get("OPENAI_KEY")
