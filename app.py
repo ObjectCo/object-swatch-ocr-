@@ -1,3 +1,11 @@
+import os
+import openai
+from dotenv import load_dotenv
+
+load_dotenv()
+openai.api_key = os.environ.get("OPENAI_API_KEY")
+
+
 import streamlit as st
 import pandas as pd
 from PIL import Image
