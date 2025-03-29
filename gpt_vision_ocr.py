@@ -6,9 +6,8 @@ import re
 import os
 from PIL import Image
 
-# ✅ Cloud Run에서는 OPENAI_API_KEY 환경변수로 직접 설정
+# ✅ OpenAI API Key 환경변수로 설정
 openai.api_key = os.environ.get("OPENAI_API_KEY")
-
 
 # ✅ 브랜드 정규화
 def normalize_company_name(name: str) -> str:
@@ -17,16 +16,19 @@ def normalize_company_name(name: str) -> str:
         return "HOKKOH"
     if "KOMON KOBO" in name or "小紋工房" in name:
         return "Uni Textile Co., Ltd."
-    if "SOJITZ" in name:
-        return "Sojitz Fashion Co., Ltd."
+    if "UNI TEXTILE" in name:
+        return "Uni Textile Co., Ltd."
+    if "OHARAYA" in name or "OHARA" in name:
+        return "Ohara Inc."
     if "ALLBLUE" in name:
         return "ALLBLUE Inc."
     if "MATSUBARA" in name:
         return "Matsubara Co., Ltd."
     if "YAGI" in name:
         return "YAGI"
+    if "VANCET" in name:
+        return "Vancet"
     return name.title().replace("Co.,Ltd.", "Co., Ltd.")
-
 
 # ✅ 품번 유효성 필터
 def is_valid_article(article: str, company=None) -> bool:
@@ -41,16 +43,20 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     if re.fullmatch(r"C\d{2,3}%?", article):
         return False
-    return bool(re.search(r"[A-Z0-9\-/#]{3,}", article)) or bool(re.search(r"\d{3,}", article))
-
+    if len(article) < 3:
+        return False
+    if not re.search(r"[A-Z0-9]", article):
+        return False
+    if article.startswith("HTTP") or ".COM" in article:
+        return False
+    return bool(re.search(r"[A-Z0-9\-/]{3,}", article)) or bool(re.search(r"\d{3,}", article))
 
 # ✅ 이미지 리사이즈
 def resize_image(image, max_size=(1600, 1600)):
     image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
-
-# ✅ 메인 추출 함수
+# ✅ GPT Vision 기반 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -58,7 +64,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # GPT Vision 프롬프트
+        # ✅ 프롬프트
         prompt_text = (
             "You are an expert OCR system for fabric swatch images.\n"
             "Extract ONLY:\n"
@@ -74,7 +80,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "- If not found, use N/A"
         )
 
-        # GPT Vision API 호출
+        # ✅ GPT Vision API 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -92,30 +98,30 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # ✅ JSON 파싱
+        # ✅ JSON 파싱 or fallback
         try:
             result = json.loads(result_text)
             used_fallback = False
         except json.JSONDecodeError:
             used_fallback = True
             company_match = re.search(r'"company"\s*:\s*"([^"]+)"', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9\-/# ]{3,})"', result_text)
+            raw_articles = re.findall(r'"([A-Z0-9\-/]{3,})"', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # 브랜드 정규화
+        # ✅ 브랜드 정규화
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
-        # 품번 필터링
+        # ✅ 품번 필터링
         filtered_articles = [
             a.strip() for a in result.get("article_numbers", [])
             if is_valid_article(a, normalized_company)
         ]
 
-        # 브랜드명 중복 제거
+        # ✅ 브랜드명 중복 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
@@ -134,4 +140,3 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
-
