@@ -7,9 +7,9 @@ import os
 from PIL import Image
 import pytesseract
 from google.cloud import vision
+from collections import Counter
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
-
 
 # ✅ 브랜드명 정규화
 def normalize_company_name(name: str) -> str:
@@ -32,7 +32,6 @@ def normalize_company_name(name: str) -> str:
         return "Vancet"
     return name.title().replace("Co.,Ltd.", "Co., Ltd.")
 
-
 # ✅ 품번 유효성 필터
 def is_valid_article(article: str, company=None) -> bool:
     article = article.strip().upper()
@@ -52,8 +51,9 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     if article.startswith("HTTP") or ".COM" in article:
         return False
+    if re.fullmatch(r"\d{3}", article):
+        return False
     return bool(re.search(r"[A-Z0-9/\-]{3,}", article)) or bool(re.search(r"\d{3,}", article))
-
 
 # ✅ OCR: Google Vision
 def google_vision_ocr(image: Image.Image) -> str:
@@ -66,11 +66,9 @@ def google_vision_ocr(image: Image.Image) -> str:
     texts = response.text_annotations
     return texts[0].description if texts else ""
 
-
 # ✅ OCR: Tesseract
 def tesseract_ocr(image: Image.Image) -> str:
     return pytesseract.image_to_string(image, lang='eng')
-
 
 # ✅ 이미지 리사이즈
 def resize_image(image, max_size=(1600, 1600)):
@@ -78,8 +76,38 @@ def resize_image(image, max_size=(1600, 1600)):
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
+# ✅ 신뢰도 기반 품번 정렬
+def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles):
+    all_sources = {
+        "GPT": gpt_articles,
+        "Google": google_articles,
+        "Tesseract": tesseract_articles
+    }
 
-# ✅ 주요 OCR 통합 처리 함수
+    article_counts = Counter()
+    article_sources = {}
+
+    for source, articles in all_sources.items():
+        for a in articles:
+            a_clean = a.strip().upper()
+            article_counts[a_clean] += 1
+            article_sources.setdefault(a_clean, set()).add(source)
+
+    scored = []
+    for article, count in article_counts.items():
+        score = 0
+        sources = article_sources[article]
+        if "GPT" in sources: score += 3
+        if "Google" in sources: score += 3
+        if "Tesseract" in sources: score += 2
+        if len(article) >= 6: score += 1
+        if "-" in article or "/" in article: score += 1
+        scored.append((article, score))
+
+    scored.sort(key=lambda x: -x[1])
+    return [a for a, s in scored if s >= 6][:5]
+
+# ✅ 메인 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -88,7 +116,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # ✅ GPT Vision 프롬프트
+        # GPT 프롬프트
         prompt_text = (
             "You are an OCR expert for fabric swatch cards.\n\n"
             "Your job is to extract exactly and only the following:\n"
@@ -107,7 +135,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "- If no data found, use \"N/A\"\n"
         )
 
-        # ✅ GPT 호출
+        # GPT Vision 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -125,7 +153,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # ✅ JSON 파싱
+        # JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -138,30 +166,26 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # ✅ OCR 보조 추출 (Google & Tesseract)
-        google_text = google_vision_ocr(image)
-        tesseract_text = tesseract_ocr(image)
-
-        combined_text = "\n".join([google_text, tesseract_text])
-        ocr_articles = re.findall(r"[A-Z0-9/\-]{3,}", combined_text)
-
-        # ✅ GPT + OCR 통합 품번 후보
-        gpt_articles = result.get("article_numbers", [])
-        all_candidates = list(set(gpt_articles + ocr_articles))
-
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
-        # ✅ 유효 품번 필터링
-        filtered_articles = [
-            a.strip() for a in all_candidates
-            if is_valid_article(a, normalized_company)
-        ]
+        # 보조 OCR 추출
+        google_text = google_vision_ocr(image)
+        tesseract_text = tesseract_ocr(image)
 
+        gpt_articles = result.get("article_numbers", [])
+        google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_text)
+        tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_text)
+
+        # 품번 후보 정리
+        all_candidates = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
+
+        # 유효성 필터
         filtered_articles = [
-            a for a in filtered_articles
-            if a.upper() != normalized_company.upper()
+            a for a in all_candidates
+            if is_valid_article(a, normalized_company)
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
+            and a.upper() != normalized_company.upper()
         ]
 
         if filename and filename.lower().startswith("hk"):
@@ -179,5 +203,4 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
-
 
