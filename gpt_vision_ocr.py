@@ -10,10 +10,9 @@ from PIL import Image
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # ✅ 브랜드명 정규화
-
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
-    if re.search(r"\\bHKKH?\\b|\\bHOKKH\\b|\\bHKH\\b", name):
+    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
         return "HOKKOH"
     if "KOMON KOBO" in name or "\u5c0f\u7d0b\u5de5\u623f" in name:
         return "Uni Textile Co., Ltd."
@@ -36,13 +35,13 @@ def is_valid_article(article: str, company=None) -> bool:
     article = article.strip().upper()
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "COMPOSITION"]:
         return False
-    if "OCA" in article and re.match(r"OCA\\d{3,}", article):
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):
         return False
     if company and article == company.upper():
         return False
-    if re.fullmatch(r"\\d{1,2}", article):
+    if re.fullmatch(r"\d{1,2}", article):
         return False
-    if re.fullmatch(r"C\\d{2,3}%?", article):
+    if re.fullmatch(r"C\d{2,3}%?", article):
         return False
     if len(article) < 3:
         return False
@@ -50,7 +49,7 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     if article.startswith("HTTP") or ".COM" in article:
         return False
-    return bool(re.search(r"[A-Z0-9\\-/]{3,}", article)) or bool(re.search(r"\\d{3,}", article))
+    return bool(re.search(r"[A-Z0-9/\-]{3,}", article)) or bool(re.search(r"\d{3,}", article))
 
 # ✅ 이미지 리사이즈
 def resize_image(image, max_size=(1600, 1600)):
