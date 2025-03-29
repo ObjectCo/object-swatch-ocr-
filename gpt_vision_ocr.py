@@ -116,26 +116,25 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # GPT 프롬프트
+        # ✳️ GPT 프롬프트 (완전 추측 금지, OCR처럼 사용)
         prompt_text = (
-            "You are an OCR expert for fabric swatch cards.\n\n"
-            "Your job is to extract exactly and only the following:\n"
-            "1. The brand name (e.g., KOMON KOBO, Uni Textile Co., Ltd., ALLBLUE Inc.)\n"
-            "2. Article numbers (e.g., AB-EX003REA, KKP2338, KCL600, etc.)\n\n"
-            "⚠️ VERY IMPORTANT:\n"
-            "- DO NOT guess or autocorrect. Extract exactly what appears in the image.\n"
-            "- DO NOT substitute or fix possible typos. Use raw OCR text as-is.\n"
-            "- If the text is unclear, skip it. Do not invent or assume values.\n\n"
-            "Rules:\n"
-            "- Brand name may appear in logo area, header, or footer.\n"
-            "- Article numbers may appear top-right, center, or lower-right.\n"
-            "- Ignore phone numbers, addresses, URLs, 'OCA' codes, color, size, composition.\n"
-            "- Format MUST be JSON:\n"
-            "  { \"company\": \"...\", \"article_numbers\": [\"...\"] }\n"
-            "- If no data found, use \"N/A\"\n"
+            "You are an OCR engine, not a reasoning AI.\n\n"
+            "Your job is to extract only what is exactly visible in the image.\n\n"
+            "Return only:\n"
+            "1. Brand name (e.g., ALLBLUE Inc., KOMON KOBO)\n"
+            "2. Article numbers (e.g., AB-EX283, KKC1003, OSDC40032)\n\n"
+            "⚠️ STRICT RULES:\n"
+            "- Do NOT guess, infer, or fix errors.\n"
+            "- Do NOT complete partial article numbers.\n"
+            "- Do NOT add or assume text.\n"
+            "- Return exactly what you see, nothing more.\n"
+            "- If the article number is partially visible, skip it.\n"
+            "- If nothing is clearly visible, return \"N/A\"\n"
+            "- Format:\n"
+            "{ \"company\": \"...\", \"article_numbers\": [\"...\"] }\n"
         )
 
-        # GPT 호출
+        # 🔁 GPT Vision API 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -153,6 +152,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
+        # ✅ JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -165,39 +165,23 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
+        # ✅ 정제
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
-        # 보조 OCR
-        google_text = google_vision_ocr(image)
-        tesseract_text = tesseract_ocr(image)
-
         gpt_articles = result.get("article_numbers", [])
-        google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_text)
-        tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_text)
+        gpt_articles = [a.strip().upper() for a in gpt_articles]
 
-        # 고신뢰 품번 추출
-        high_confidence = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
-
-        # 필터링
+        # ✅ 불필요/전형적 오류 패턴 제거
         filtered_articles = [
-            a for a in high_confidence
+            a for a in gpt_articles
             if is_valid_article(a, normalized_company)
+            and not a.startswith("000") and not a.endswith("001") and not a.endswith("003")
             and a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
         ]
 
-        # fallback: GPT라도 뽑자
-        if not filtered_articles:
-            fallback_articles = [
-                a for a in gpt_articles
-                if is_valid_article(a, normalized_company)
-                and a.upper() != normalized_company.upper()
-                and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
-            ]
-            filtered_articles = fallback_articles[:3]
-
-        # 'hk' 예외 처리
+        # ✅ 'hk' 예외 처리
         if filename and filename.lower().startswith("hk"):
             filtered_articles = [a for a in filtered_articles if a != "N/A"]
 
