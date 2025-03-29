@@ -172,14 +172,17 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         gpt_articles = result.get("article_numbers", [])
         gpt_articles = [a.strip().upper() for a in gpt_articles]
 
-        # ✅ 불필요/전형적 오류 패턴 제거
+        # ✅ 불필요/전형적 오류 패턴 제거 (정교하게 수정된 버전)
         filtered_articles = [
             a for a in gpt_articles
             if is_valid_article(a, normalized_company)
-            and not a.startswith("000") and not a.endswith("001") and not a.endswith("003")
+            # 아래는 실제 오류 패턴만 제거 (예: 단순 '003', '000', AB-EX003 등)
+            and not re.fullmatch(r"(AB[\-/]EX)?00[13]", a)
+            and not a.startswith("000")
             and a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
         ]
+
 
         # ✅ 'hk' 예외 처리
         if filename and filename.lower().startswith("hk"):
