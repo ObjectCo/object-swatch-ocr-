@@ -5,11 +5,10 @@ import json
 import re
 import os
 from PIL import Image
-from dotenv import load_dotenv
 
-# ✅ .env 환경변수 로드
-if os.environ.get("ENV") != "production":
-    load_dotenv(dotenv_path=".env")
+# ✅ Cloud Run에서는 OPENAI_API_KEY 환경변수로 직접 설정
+openai.api_key = os.environ.get("OPENAI_API_KEY")
+
 
 # ✅ 브랜드 정규화
 def normalize_company_name(name: str) -> str:
@@ -59,7 +58,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # 🧠 GPT 프롬프트
+        # GPT Vision 프롬프트
         prompt_text = (
             "You are an expert OCR system for fabric swatch images.\n"
             "Extract ONLY:\n"
@@ -75,7 +74,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "- If not found, use N/A"
         )
 
-        # GPT Vision 호출
+        # GPT Vision API 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -135,3 +134,4 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
