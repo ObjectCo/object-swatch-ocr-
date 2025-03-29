@@ -3,3 +3,5 @@ pandas
 Pillow
 openai>=1.2.0
 python-dotenv
+pytesseract
+google-cloud-vision
