@@ -108,7 +108,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         except json.JSONDecodeError:
             used_fallback = True
             company_match = re.search(r'"?company"?\s*:\s*"([^"]+)"', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9\\-/]{3,})"', result_text)
+            raw_articles = re.findall(r'"([A-Z0-9/\-]{3,})"', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
