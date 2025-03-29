@@ -135,7 +135,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "- If no data found, use \"N/A\"\n"
         )
 
-        # GPT Vision 호출
+        # GPT 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -153,7 +153,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -169,7 +168,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
-        # 보조 OCR 추출
+        # 보조 OCR
         google_text = google_vision_ocr(image)
         tesseract_text = tesseract_ocr(image)
 
@@ -177,17 +176,28 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_text)
         tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_text)
 
-        # 품번 후보 정리
-        all_candidates = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
+        # 고신뢰 품번 추출
+        high_confidence = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
 
-        # 유효성 필터
+        # 필터링
         filtered_articles = [
-            a for a in all_candidates
+            a for a in high_confidence
             if is_valid_article(a, normalized_company)
-            and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
             and a.upper() != normalized_company.upper()
+            and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
         ]
 
+        # fallback: GPT라도 뽑자
+        if not filtered_articles:
+            fallback_articles = [
+                a for a in gpt_articles
+                if is_valid_article(a, normalized_company)
+                and a.upper() != normalized_company.upper()
+                and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
+            ]
+            filtered_articles = fallback_articles[:3]
+
+        # 'hk' 예외 처리
         if filename and filename.lower().startswith("hk"):
             filtered_articles = [a for a in filtered_articles if a != "N/A"]
 
