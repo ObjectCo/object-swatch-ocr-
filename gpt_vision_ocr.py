@@ -6,7 +6,6 @@ import re
 import os
 from PIL import Image
 
-# ✅ OpenAI API Key 설정
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # ✅ 브랜드명 정규화
@@ -51,12 +50,13 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     return bool(re.search(r"[A-Z0-9/\-]{3,}", article)) or bool(re.search(r"\d{3,}", article))
 
-# ✅ 이미지 리사이즈
+# ✅ 이미지 리사이즈 (너무 클 때만 리사이즈)
 def resize_image(image, max_size=(1600, 1600)):
-    image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    if image.width > max_size[0] or image.height > max_size[1]:
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
-# ✅ GPT Vision 기반 품번/브랜드 추출 함수
+# ✅ GPT Vision 기반 품번/브랜드 추출
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -64,25 +64,29 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # ✅ 강화된 GPT 프롬프트
+        # ✅ 강화된 프롬프트
         prompt_text = (
             "You are an OCR expert for fabric swatch cards.\n\n"
-            "Your job is to extract only the following from the image:\n"
+            "Your job is to extract exactly and only the following:\n"
             "1. The brand name (e.g., KOMON KOBO, Uni Textile Co., Ltd., ALLBLUE Inc.)\n"
-            "2. Article numbers (e.g., AB-EX003REA, KKP2338, KKF 8825CD, KCL600, etc.)\n\n"
+            "2. Article numbers (e.g., AB-EX003REA, KKP2338, KCL600, etc.)\n\n"
+            "⚠️ VERY IMPORTANT:\n"
+            "- DO NOT guess or autocorrect. Extract exactly what appears in the image.\n"
+            "- DO NOT substitute or fix possible typos. Use raw OCR text as-is.\n"
+            "- If the text is unclear, skip it. Do not invent or assume values.\n"
+            "- If article number seems odd, still keep it as-is if legible.\n\n"
             "Rules:\n"
-            "- Brand name may appear in logo area (top-left), header, or footer.\n"
+            "- Brand name may appear in logo area, header, or footer.\n"
             "- If you see '小紋工房', interpret it as KOMON KOBO (Uni Textile Co., Ltd.)\n"
-            "- Article numbers may appear top-right, center or lower-right, often near '品番', 'No.', or 'Article'.\n"
-            "- DO NOT extract phone, address, website, composition, color, size, URL, or 'OCA' codes.\n"
-            "- Ignore anything with TEL, FAX, HTTP, WWW, or non-descriptive numbers.\n"
-            "- Avoid ranges like '424~426'. List each article number separately.\n"
-            "- Format MUST be pure JSON:\n"
+            "- Article numbers may appear top-right, center, or lower-right.\n"
+            "- Ignore phone numbers, addresses, URLs, 'OCA' codes, color, size, composition.\n"
+            "- Avoid ranges like '424~426'. List as separate only if clearly written.\n"
+            "- Format MUST be JSON:\n"
             "  { \"company\": \"...\", \"article_numbers\": [\"...\"] }\n"
-            "- Use 'N/A' if nothing is found.\n"
+            "- If no data found, use \"N/A\"\n"
         )
 
-        # ✅ API 호출
+        # ✅ OpenAI API 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -116,12 +120,13 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
-        # ✅ 필터링 및 후처리
+        # ✅ 품번 필터링
         filtered_articles = [
             a.strip() for a in result.get("article_numbers", [])
             if is_valid_article(a, normalized_company)
         ]
 
+        # ✅ 중복 브랜드명 제거
         filtered_articles = [
             a for a in filtered_articles
             if a.upper() != normalized_company.upper()
