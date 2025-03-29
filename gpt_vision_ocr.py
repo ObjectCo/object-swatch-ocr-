@@ -55,6 +55,15 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     return bool(re.search(r"[A-Z0-9/\-]{3,}", article)) or bool(re.search(r"\d{3,}", article))
 
+# ✅ 오탐 가능성 높은 품번 감지
+def is_suspicious_article(article: str) -> bool:
+    a = article.upper()
+    if re.search(r"(.)\1{2,}", a):  # 같은 문자 반복 3번 이상 (예: YGUUU003)
+        return True
+    if re.fullmatch(r"\d{2,3}[A-Z]{2,}X+\d{3}", a):  # 비정상 문자 반복 + X 반복
+        return True
+    return False
+
 # ✅ OCR: Google Vision
 def google_vision_ocr(image: Image.Image) -> str:
     client = vision.ImageAnnotatorClient()
@@ -107,7 +116,7 @@ def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articl
     scored.sort(key=lambda x: -x[1])
     return [a for a, s in scored if s >= 6][:5]
 
-# ✅ 메인 함수
+# ✅ 메인 추출 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
@@ -116,7 +125,7 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # ✳️ GPT 프롬프트 (완전 추측 금지, OCR처럼 사용)
+        # 프롬프트
         prompt_text = (
             "You are an OCR engine, not a reasoning AI.\n\n"
             "Your job is to extract only what is exactly visible in the image.\n\n"
@@ -134,7 +143,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "{ \"company\": \"...\", \"article_numbers\": [\"...\"] }\n"
         )
 
-        # 🔁 GPT Vision API 호출
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -152,7 +160,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
 
         result_text = response.choices[0].message.content.strip()
 
-        # ✅ JSON 파싱
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -165,26 +172,36 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
             }
 
-        # ✅ 정제
         raw_company = result.get("company", "N/A").strip()
         normalized_company = normalize_company_name(raw_company)
 
         gpt_articles = result.get("article_numbers", [])
-        gpt_articles = [a.strip().upper() for a in gpt_articles]
+        google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
+        tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
 
-        # ✅ 불필요/전형적 오류 패턴 제거 (정교하게 수정된 버전)
+        # 고신뢰 품번 추출
+        high_confidence = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
+
         filtered_articles = [
-            a for a in gpt_articles
+            a for a in high_confidence
             if is_valid_article(a, normalized_company)
-            # 아래는 실제 오류 패턴만 제거 (예: 단순 '003', '000', AB-EX003 등)
             and not re.fullmatch(r"(AB[\-/]EX)?00[13]", a)
             and not a.startswith("000")
+            and not is_suspicious_article(a)
             and a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
         ]
 
+        # fallback: GPT라도 최대 3개 뽑기
+        if not filtered_articles:
+            fallback_articles = [
+                a for a in gpt_articles
+                if is_valid_article(a, normalized_company)
+                and not is_suspicious_article(a)
+            ]
+            filtered_articles = fallback_articles[:3]
 
-        # ✅ 'hk' 예외 처리
+        # 'hk' 예외 처리
         if filename and filename.lower().startswith("hk"):
             filtered_articles = [a for a in filtered_articles if a != "N/A"]
 
@@ -200,3 +217,4 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
