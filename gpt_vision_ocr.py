@@ -10,12 +10,6 @@ from google.cloud import vision
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# ✅ 이미지 리사이즈
-def resize_image(image, max_size=(1600, 1600)):
-    if image.width > max_size[0] or image.height > max_size[1]:
-        image.thumbnail(max_size, Image.Resampling.LANCZOS)
-    return image
-
 # ✅ Tesseract OCR
 def tesseract_ocr(image: Image.Image) -> str:
     return pytesseract.image_to_string(image, lang='eng')
@@ -175,9 +169,12 @@ def score_articles(gpt_articles, google_articles, tesseract_articles, crop_artic
 
         scored.append((article, score))
 
+    # 점수순 정렬
     scored.sort(key=lambda x: -x[1])
     return scored
 
+
+import re
 from postprocess import is_valid_article, is_suspicious_article
 
 def filter_scored_articles(scored_articles, company_name, max_return=5):
@@ -212,6 +209,7 @@ import pytesseract
 from google.cloud import vision
 
 # ✅ 이미지 리사이즈
+# ✅ utils.py
 def resize_image(image, max_size=(1600, 1600)):
     if image.width > max_size[0] or image.height > max_size[1]:
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
@@ -239,43 +237,14 @@ def extract_yagi_article_crop(img: Image.Image) -> str:
     match = re.search(r'Item[#]?\s*[:\-]?\s*([A-Z0-9\-]{6,})', text.upper())
     return match.group(1) if match else "N/A"
 
-from collections import Counter
-
-def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles):
-    all_sources = {
-        "GPT": gpt_articles,
-        "Google": google_articles,
-        "Tesseract": tesseract_articles
-    }
-
-    article_counts = Counter()
-    article_sources = {}
-
-    for source, articles in all_sources.items():
-        for a in articles:
-            a_clean = a.strip().upper()
-            article_counts[a_clean] += 1
-            article_sources.setdefault(a_clean, set()).add(source)
-
-    scored = []
-    for article, count in article_counts.items():
-        score = 0
-        sources = article_sources[article]
-        if "GPT" in sources: score += 3
-        if "Google" in sources: score += 3
-        if "Tesseract" in sources: score += 2
-        if len(article) >= 6: score += 1
-        if "-" in article or "/" in article: score += 1
-        if article.endswith("RA") or re.match(r"[A-Z]{2,}-\w+", article): score += 1
-        scored.append((article, score))
-
-    scored.sort(key=lambda x: -x[1])
-    return [a for a, s in scored if s >= 6][:5]
 
 import openai
 import base64
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
+
+# ✅ postprocess.py 에 정의된 함수 이름과 일치
+from postprocess import parse_gpt_response
 
 def call_gpt_ocr(image: Image.Image) -> (dict, bool):
     buffered = io.BytesIO()
@@ -317,46 +286,32 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
 
-        # OCR 결과
-        gpt_result, used_fallback = call_gpt_ocr(image)
-        gpt_articles = gpt_result.get("article_numbers", [])
-        raw_company = gpt_result.get("company", "N/A").strip()
+        # 🔹 GPT OCR + 파싱
+        gpt_result_text = gpt_vision_ocr(image, prompt_text)
+        raw_company, gpt_articles, used_fallback = parse_gpt_response(gpt_result_text)
         normalized_company = normalize_company_name(raw_company)
 
+        # 🔹 다른 OCR 결과
         google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
         tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
 
-        # YAGI 보정
+        # 🔹 YAGI 전용 보정
         crop_articles = []
         if normalized_company == "YAGI":
-            extracted = extract_yagi_article_crop(image)
-            if extracted != "N/A":
-                crop_articles = [extracted]
+            yagi_article = extract_yagi_article_crop(image)
+            if yagi_article != "N/A":
+                crop_articles = [yagi_article]
 
-        # 통합 신뢰도 정제
-        high_confidence = get_high_confidence_articles(
-            gpt_articles + crop_articles,
+        # ✅ 통합 신뢰도 스코어링
+        scored = score_articles(
+            gpt_articles,
             google_articles,
-            tesseract_articles
+            tesseract_articles,
+            crop_articles
         )
 
-        # 필터링
-        filtered_articles = [
-            a for a in high_confidence
-            if is_valid_article(a, normalized_company)
-            and not is_suspicious_article(a)
-            and a.upper() != normalized_company.upper()
-            and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
-        ]
-
-        # fallback
-        if not filtered_articles:
-            fallback_articles = [
-                a for a in gpt_articles
-                if is_valid_article(a, normalized_company)
-                and not is_suspicious_article(a)
-            ]
-            filtered_articles = fallback_articles[:3]
+        # ✅ 최종 유효 article 필터링
+        filtered_articles = filter_scored_articles(scored, normalized_company)
 
         return {
             "company": normalized_company if normalized_company else "N/A",
@@ -370,4 +325,5 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
 
