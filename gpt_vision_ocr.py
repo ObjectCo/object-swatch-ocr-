@@ -117,29 +117,36 @@ def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articl
     return [a for a, s in scored if s >= 6][:5]
 
 # ✅ 메인 추출 함수
+# 🔁 최종 버전 개선 extract_info_from_image 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
 
+        # ✅ 우측 상단 'No.' 박스 품번 우선 추출 (ALLBLUE 전용)
+        def extract_article_from_top_box(img):
+            crop = img.crop((500, 20, 980, 170))
+            text = pytesseract.image_to_string(crop, lang="eng")
+            matches = re.findall(r"AB[-/]?EX\d{3}[A-Z]*", text.upper())
+            return matches
+
+        # 🔹 YAGI 박스 크롭
+        def extract_yagi_article_crop(image):
+            cropped = image.crop((520, 40, 980, 160))
+            text = pytesseract.image_to_string(cropped, lang='eng')
+            matches = re.findall(r"[A-Z0-9\-]{6,}", text.upper())
+            return matches
+
+        # GPT 호출
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         prompt_text = (
-            "You are an OCR engine, not a reasoning AI.\n\n"
-            "Your job is to extract only what is exactly visible in the image.\n\n"
+            "You are an OCR engine, not a reasoning AI.\n"
+            "Your job is to extract only what is exactly visible in the image.\n"
             "Return only:\n"
-            "1. Brand name (e.g., ALLBLUE Inc., KOMON KOBO)\n"
-            "2. Article numbers (e.g., AB-EX283, KKC1003, OSDC40032)\n\n"
-            "⚠️ STRICT RULES:\n"
-            "- Do NOT guess, infer, or fix errors.\n"
-            "- Do NOT complete partial article numbers.\n"
-            "- Do NOT add or assume text.\n"
-            "- Return exactly what you see, nothing more.\n"
-            "- If the article number is partially visible, skip it.\n"
-            "- If nothing is clearly visible, return \"N/A\"\n"
-            "- Format:\n"
-            "{ \"company\": \"...\", \"article_numbers\": [\"...\"] }"
+            "1. Brand name\n2. Article numbers\n"
+            "Format:\n{ \"company\": \"...\", \"article_numbers\": [\"...\"] }"
         )
 
         response = openai.chat.completions.create(
@@ -158,14 +165,13 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         )
 
         result_text = response.choices[0].message.content.strip()
-
         try:
             result = json.loads(result_text)
             used_fallback = False
         except json.JSONDecodeError:
             used_fallback = True
-            company_match = re.search(r'"?company"?\s*:\s*"([^"]+)",?', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9/\\-]{3,})"', result_text)
+            company_match = re.search(r'"?company"?\s*:\s*"([^"]+)"', result_text)
+            raw_articles = re.findall(r'"([A-Z0-9/\-]{3,})"', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
@@ -175,16 +181,26 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         normalized_company = normalize_company_name(raw_company)
 
         gpt_articles = result.get("article_numbers", [])
-        google_articles = re.findall(r"[A-Z0-9/\\-]{3,}", google_vision_ocr(image))
-        tesseract_articles = re.findall(r"[A-Z0-9/\\-]{3,}", tesseract_ocr(image))
+        google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
+        tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
 
-        high_confidence = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
+        # 크롭된 박스 OCR 우선 적용
+        crop_articles = []
+        if normalized_company == "ALLBLUE Inc.":
+            crop_articles = extract_article_from_top_box(image)
+        elif normalized_company == "YAGI":
+            crop_articles = extract_yagi_article_crop(image)
+
+        # 통합 품번 신뢰도 기반 정렬
+        high_confidence = get_high_confidence_articles(
+            gpt_articles + crop_articles,
+            google_articles,
+            tesseract_articles
+        )
 
         filtered_articles = [
             a for a in high_confidence
             if is_valid_article(a, normalized_company)
-            and not re.fullmatch(r"(AB[\\-/]EX)?00[13]", a)
-            and not a.startswith("000")
             and not is_suspicious_article(a)
             and a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
@@ -213,3 +229,4 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
