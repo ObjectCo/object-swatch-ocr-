@@ -4,7 +4,7 @@ import io
 import json
 import re
 import os
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageOps
 import pytesseract
 from google.cloud import vision
 from collections import Counter
@@ -64,6 +64,15 @@ def is_suspicious_article(article: str) -> bool:
         return True
     return False
 
+# ✅ 이미지 리사이즈 및 대비 강화
+def preprocess_image(image, max_size=(1600, 1600)):
+    if image.width > max_size[0] or image.height > max_size[1]:
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    image = ImageOps.grayscale(image)
+    image = ImageEnhance.Contrast(image).enhance(2.0)
+    image = ImageEnhance.Sharpness(image).enhance(2.0)
+    return image
+
 # ✅ Google Vision OCR
 def google_vision_ocr(image: Image.Image) -> str:
     client = vision.ImageAnnotatorClient()
@@ -79,15 +88,9 @@ def google_vision_ocr(image: Image.Image) -> str:
 def tesseract_ocr(image: Image.Image) -> str:
     return pytesseract.image_to_string(image, lang='eng')
 
-# ✅ 이미지 리사이즈
-def resize_image(image, max_size=(1600, 1600)):
-    if image.width > max_size[0] or image.height > max_size[1]:
-        image.thumbnail(max_size, Image.Resampling.LANCZOS)
-    return image
-
 # ✅ YAGI 전용 품번 크롭 추출
 def extract_yagi_article_crop(img: Image.Image) -> str:
-    cropped = img.crop((480, 38, 950, 155))  # 좌표는 필요 시 조정
+    cropped = img.crop((480, 38, 950, 155))  # 좌표 조정 가능
     text = pytesseract.image_to_string(cropped, lang='eng')
     match = re.search(r'Item[#]?\s*[:\-]?\s*([A-Z0-9\-]{6,})', text.upper())
     if match:
@@ -101,10 +104,8 @@ def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articl
         "Google": google_articles,
         "Tesseract": tesseract_articles
     }
-
     article_counts = Counter()
     article_sources = {}
-
     for source, articles in all_sources.items():
         for a in articles:
             a_clean = a.strip().upper()
@@ -128,9 +129,9 @@ def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articl
 # ✅ 메인 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
-        image = resize_image(image)
+        image = preprocess_image(image)
 
-        # 🔹 GPT 호출
+        # GPT Vision 호출
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -177,14 +178,12 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
         tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
 
-        # YAGI 전용 품번 보정
         crop_articles = []
         if normalized_company == "YAGI":
             extracted = extract_yagi_article_crop(image)
             if extracted != "N/A":
                 crop_articles = [extracted]
 
-        # 신뢰도 기반 정제
         high_confidence = get_high_confidence_articles(
             gpt_articles + crop_articles, google_articles, tesseract_articles
         )
