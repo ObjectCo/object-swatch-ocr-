@@ -14,7 +14,7 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 # ✅ 브랜드명 정규화
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
-    if re.search(r"\\bHKKH?\\b|\\bHOKKH\\b|\\bHKH\\b", name):
+    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
         return "HOKKOH"
     if "KOMON KOBO" in name or "\u5c0f\u7d0b\u5de5\u623f" in name:
         return "Uni Textile Co., Ltd."
@@ -37,13 +37,13 @@ def is_valid_article(article: str, company=None) -> bool:
     article = article.strip().upper()
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "COMPOSITION"]:
         return False
-    if "OCA" in article and re.match(r"OCA\\d{3,}", article):
+    if "OCA" in article and re.match(r"OCA\d{3,}", article):
         return False
     if company and article == company.upper():
         return False
-    if re.fullmatch(r"\\d{1,2}", article):
+    if re.fullmatch(r"\d{1,2}", article):
         return False
-    if re.fullmatch(r"C\\d{2,3}%?", article):
+    if re.fullmatch(r"C\d{2,3}%?", article):
         return False
     if len(article) < 3:
         return False
@@ -51,20 +51,20 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     if article.startswith("HTTP") or ".COM" in article:
         return False
-    if re.fullmatch(r"\\d{3}", article):
+    if re.fullmatch(r"\d{3}", article):
         return False
-    return bool(re.search(r"[A-Z0-9/\\-]{3,}", article)) or bool(re.search(r"\\d{3,}", article))
+    return bool(re.search(r"[A-Z0-9/\-]{3,}", article)) or bool(re.search(r"\d{3,}", article))
 
 # ✅ 오탐 가능성 높은 품번 감지
 def is_suspicious_article(article: str) -> bool:
     a = article.upper()
-    if re.search(r"(.)\\1{2,}", a):
+    if re.search(r"(.)\1{2,}", a):
         return True
-    if re.fullmatch(r"\\d{2,3}[A-Z]{2,}X+\\d{3}", a):
+    if re.fullmatch(r"\d{2,3}[A-Z]{2,}X+\d{3}", a):
         return True
     return False
 
-# ✅ OCR: Google Vision
+# ✅ Google Vision OCR
 def google_vision_ocr(image: Image.Image) -> str:
     client = vision.ImageAnnotatorClient()
     buffered = io.BytesIO()
@@ -75,7 +75,7 @@ def google_vision_ocr(image: Image.Image) -> str:
     texts = response.text_annotations
     return texts[0].description if texts else ""
 
-# ✅ OCR: Tesseract
+# ✅ Tesseract OCR
 def tesseract_ocr(image: Image.Image) -> str:
     return pytesseract.image_to_string(image, lang='eng')
 
@@ -84,6 +84,15 @@ def resize_image(image, max_size=(1600, 1600)):
     if image.width > max_size[0] or image.height > max_size[1]:
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
+
+# ✅ YAGI 전용 품번 크롭 추출
+def extract_yagi_article_crop(img: Image.Image) -> str:
+    cropped = img.crop((480, 38, 950, 155))  # 좌표는 필요 시 조정
+    text = pytesseract.image_to_string(cropped, lang='eng')
+    match = re.search(r'Item[#]?\s*[:\-]?\s*([A-Z0-9\-]{6,})', text.upper())
+    if match:
+        return match.group(1)
+    return "N/A"
 
 # ✅ 신뢰도 기반 품번 정렬
 def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles):
@@ -116,33 +125,17 @@ def get_high_confidence_articles(gpt_articles, google_articles, tesseract_articl
     scored.sort(key=lambda x: -x[1])
     return [a for a, s in scored if s >= 6][:5]
 
-# ✅ 메인 추출 함수
-# 🔁 최종 버전 개선 extract_info_from_image 함수
+# ✅ 메인 함수
 def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
 
-        # ✅ 우측 상단 'No.' 박스 품번 우선 추출 (ALLBLUE 전용)
-        def extract_article_from_top_box(img):
-            crop = img.crop((500, 20, 980, 170))
-            text = pytesseract.image_to_string(crop, lang="eng")
-            matches = re.findall(r"AB[-/]?EX\d{3}[A-Z]*", text.upper())
-            return matches
-
-        # 🔹 YAGI 박스 크롭
-        def extract_yagi_article_crop(image):
-            cropped = image.crop((520, 40, 980, 160))
-            text = pytesseract.image_to_string(cropped, lang='eng')
-            matches = re.findall(r"[A-Z0-9\-]{6,}", text.upper())
-            return matches
-
-        # GPT 호출
+        # 🔹 GPT 호출
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
         prompt_text = (
-            "You are an OCR engine, not a reasoning AI.\n"
+            "You are an OCR engine, not a reasoning AI.\n\n"
             "Your job is to extract only what is exactly visible in the image.\n"
             "Return only:\n"
             "1. Brand name\n2. Article numbers\n"
@@ -184,23 +177,23 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
         tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
 
-        # 크롭된 박스 OCR 우선 적용
+        # YAGI 전용 품번 보정
         crop_articles = []
-        if normalized_company == "ALLBLUE Inc.":
-            crop_articles = extract_article_from_top_box(image)
-        elif normalized_company == "YAGI":
-            crop_articles = extract_yagi_article_crop(image)
+        if normalized_company == "YAGI":
+            extracted = extract_yagi_article_crop(image)
+            if extracted != "N/A":
+                crop_articles = [extracted]
 
-        # 통합 품번 신뢰도 기반 정렬
+        # 신뢰도 기반 정제
         high_confidence = get_high_confidence_articles(
-            gpt_articles + crop_articles,
-            google_articles,
-            tesseract_articles
+            gpt_articles + crop_articles, google_articles, tesseract_articles
         )
 
         filtered_articles = [
             a for a in high_confidence
             if is_valid_article(a, normalized_company)
+            and not re.fullmatch(r"(AB[\-/]EX)?00[13]", a)
+            and not a.startswith("000")
             and not is_suspicious_article(a)
             and a.upper() != normalized_company.upper()
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
