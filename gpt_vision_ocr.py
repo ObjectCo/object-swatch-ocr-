@@ -286,6 +286,20 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
 
+        # ✅ prompt_text 선언 누락되었으므로 여기에 추가
+        prompt_text = (
+            "You are an OCR engine, not a reasoning AI.\n"
+            "Extract exactly what is clearly visible.\n"
+            "Return only:\n"
+            "- company (brand name)\n"
+            "- article_numbers (e.g. AB-EX123, 19023, MFA-7678)\n\n"
+            "STRICT RULES:\n"
+            "- Do not infer or guess.\n"
+            "- If partially shown, skip.\n"
+            "- If nothing visible, return 'N/A'.\n"
+            "- Format: { \"company\": \"...\", \"article_numbers\": [\"...\"] }"
+        )
+
         # 🔹 GPT OCR + 파싱
         gpt_result_text = gpt_vision_ocr(image, prompt_text)
         raw_company, gpt_articles, used_fallback = parse_gpt_response(gpt_result_text)
