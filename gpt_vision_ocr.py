@@ -14,7 +14,7 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 # ✅ 브랜드명 정규화
 def normalize_company_name(name: str) -> str:
     name = name.strip().upper()
-    if re.search(r"\bHKKH?\b|\bHOKKH\b|\bHKH\b", name):
+    if re.search(r"\\bHKKH?\\b|\\bHOKKH\\b|\\bHKH\\b", name):
         return "HOKKOH"
     if "KOMON KOBO" in name or "\u5c0f\u7d0b\u5de5\u623f" in name:
         return "Uni Textile Co., Ltd."
@@ -37,13 +37,13 @@ def is_valid_article(article: str, company=None) -> bool:
     article = article.strip().upper()
     if article in ["TEL", "FAX", "HTTP", "WWW", "ARTICLE", "COLOR", "COMPOSITION"]:
         return False
-    if "OCA" in article and re.match(r"OCA\d{3,}", article):
+    if "OCA" in article and re.match(r"OCA\\d{3,}", article):
         return False
     if company and article == company.upper():
         return False
-    if re.fullmatch(r"\d{1,2}", article):
+    if re.fullmatch(r"\\d{1,2}", article):
         return False
-    if re.fullmatch(r"C\d{2,3}%?", article):
+    if re.fullmatch(r"C\\d{2,3}%?", article):
         return False
     if len(article) < 3:
         return False
@@ -51,16 +51,16 @@ def is_valid_article(article: str, company=None) -> bool:
         return False
     if article.startswith("HTTP") or ".COM" in article:
         return False
-    if re.fullmatch(r"\d{3}", article):
+    if re.fullmatch(r"\\d{3}", article):
         return False
-    return bool(re.search(r"[A-Z0-9/\-]{3,}", article)) or bool(re.search(r"\d{3,}", article))
+    return bool(re.search(r"[A-Z0-9/\\-]{3,}", article)) or bool(re.search(r"\\d{3,}", article))
 
 # ✅ 오탐 가능성 높은 품번 감지
 def is_suspicious_article(article: str) -> bool:
     a = article.upper()
-    if re.search(r"(.)\1{2,}", a):  # 같은 문자 반복 3번 이상 (예: YGUUU003)
+    if re.search(r"(.)\\1{2,}", a):
         return True
-    if re.fullmatch(r"\d{2,3}[A-Z]{2,}X+\d{3}", a):  # 비정상 문자 반복 + X 반복
+    if re.fullmatch(r"\\d{2,3}[A-Z]{2,}X+\\d{3}", a):
         return True
     return False
 
@@ -121,24 +121,25 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
 
-        # 🔹 YAGI 예외 처리: 우측 상단 박스 OCR
-        def extract_yagi_article_crop(image):
-            # 이미지에서 특정 영역만 잘라서 OCR
-            cropped = image.crop((520, 40, 980, 160))  # 좌표는 추후 조정 가능
-            text = pytesseract.image_to_string(cropped, lang='eng')
-            matches = re.findall(r"[A-Z0-9\-]{6,}", text.upper())
-            return matches
-
-        # GPT 호출
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
         prompt_text = (
             "You are an OCR engine, not a reasoning AI.\n\n"
-            "Your job is to extract only what is exactly visible in the image.\n"
+            "Your job is to extract only what is exactly visible in the image.\n\n"
             "Return only:\n"
-            "1. Brand name\n2. Article numbers\n"
-            "Format:\n{ \"company\": \"...\", \"article_numbers\": [\"...\"] }"
+            "1. Brand name (e.g., ALLBLUE Inc., KOMON KOBO)\n"
+            "2. Article numbers (e.g., AB-EX283, KKC1003, OSDC40032)\n\n"
+            "⚠️ STRICT RULES:\n"
+            "- Do NOT guess, infer, or fix errors.\n"
+            "- Do NOT complete partial article numbers.\n"
+            "- Do NOT add or assume text.\n"
+            "- Return exactly what you see, nothing more.\n"
+            "- If the article number is partially visible, skip it.\n"
+            "- If nothing is clearly visible, return \"N/A\"\n"
+            "- Format:\n"
+            "{ \"company\": \"...\", \"article_numbers\": [\"...\"] }"
         )
 
         response = openai.chat.completions.create(
@@ -157,13 +158,14 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         )
 
         result_text = response.choices[0].message.content.strip()
+
         try:
             result = json.loads(result_text)
             used_fallback = False
         except json.JSONDecodeError:
             used_fallback = True
-            company_match = re.search(r'"?company"?\s*:\s*"([^"]+)"', result_text)
-            raw_articles = re.findall(r'"([A-Z0-9/\-]{3,})"', result_text)
+            company_match = re.search(r'"?company"?\s*:\s*"([^"]+)",?', result_text)
+            raw_articles = re.findall(r'"([A-Z0-9/\\-]{3,})"', result_text)
             result = {
                 "company": company_match.group(1).strip() if company_match else "N/A",
                 "article_numbers": list(set(raw_articles)) if raw_articles else ["N/A"]
@@ -173,25 +175,15 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         normalized_company = normalize_company_name(raw_company)
 
         gpt_articles = result.get("article_numbers", [])
-        google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
-        tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
+        google_articles = re.findall(r"[A-Z0-9/\\-]{3,}", google_vision_ocr(image))
+        tesseract_articles = re.findall(r"[A-Z0-9/\\-]{3,}", tesseract_ocr(image))
 
-        # YAGI 전용 크롭 품번 추출
-        crop_articles = []
-        if normalized_company == "YAGI":
-            crop_articles = extract_yagi_article_crop(image)
-
-        # 신뢰도 기반 통합
-        high_confidence = get_high_confidence_articles(
-            gpt_articles + crop_articles,
-            google_articles,
-            tesseract_articles
-        )
+        high_confidence = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
 
         filtered_articles = [
             a for a in high_confidence
             if is_valid_article(a, normalized_company)
-            and not re.fullmatch(r"(AB[\-/]EX)?00[13]", a)
+            and not re.fullmatch(r"(AB[\\-/]EX)?00[13]", a)
             and not a.startswith("000")
             and not is_suspicious_article(a)
             and a.upper() != normalized_company.upper()
@@ -221,5 +213,3 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
-
-
