@@ -121,26 +121,24 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
     try:
         image = resize_image(image)
 
+        # 🔹 YAGI 예외 처리: 우측 상단 박스 OCR
+        def extract_yagi_article_crop(image):
+            # 이미지에서 특정 영역만 잘라서 OCR
+            cropped = image.crop((520, 40, 980, 160))  # 좌표는 추후 조정 가능
+            text = pytesseract.image_to_string(cropped, lang='eng')
+            matches = re.findall(r"[A-Z0-9\-]{6,}", text.upper())
+            return matches
+
+        # GPT 호출
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-        # 프롬프트
         prompt_text = (
             "You are an OCR engine, not a reasoning AI.\n\n"
-            "Your job is to extract only what is exactly visible in the image.\n\n"
+            "Your job is to extract only what is exactly visible in the image.\n"
             "Return only:\n"
-            "1. Brand name (e.g., ALLBLUE Inc., KOMON KOBO)\n"
-            "2. Article numbers (e.g., AB-EX283, KKC1003, OSDC40032)\n\n"
-            "⚠️ STRICT RULES:\n"
-            "- Do NOT guess, infer, or fix errors.\n"
-            "- Do NOT complete partial article numbers.\n"
-            "- Do NOT add or assume text.\n"
-            "- Return exactly what you see, nothing more.\n"
-            "- If the article number is partially visible, skip it.\n"
-            "- If nothing is clearly visible, return \"N/A\"\n"
-            "- Format:\n"
-            "{ \"company\": \"...\", \"article_numbers\": [\"...\"] }\n"
+            "1. Brand name\n2. Article numbers\n"
+            "Format:\n{ \"company\": \"...\", \"article_numbers\": [\"...\"] }"
         )
 
         response = openai.chat.completions.create(
@@ -159,7 +157,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         )
 
         result_text = response.choices[0].message.content.strip()
-
         try:
             result = json.loads(result_text)
             used_fallback = False
@@ -179,8 +176,17 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
         google_articles = re.findall(r"[A-Z0-9/\-]{3,}", google_vision_ocr(image))
         tesseract_articles = re.findall(r"[A-Z0-9/\-]{3,}", tesseract_ocr(image))
 
-        # 고신뢰 품번 추출
-        high_confidence = get_high_confidence_articles(gpt_articles, google_articles, tesseract_articles)
+        # YAGI 전용 크롭 품번 추출
+        crop_articles = []
+        if normalized_company == "YAGI":
+            crop_articles = extract_yagi_article_crop(image)
+
+        # 신뢰도 기반 통합
+        high_confidence = get_high_confidence_articles(
+            gpt_articles + crop_articles,
+            google_articles,
+            tesseract_articles
+        )
 
         filtered_articles = [
             a for a in high_confidence
@@ -192,7 +198,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             and normalized_company.replace(" ", "").upper() not in a.replace(" ", "").upper()
         ]
 
-        # fallback: GPT라도 최대 3개 뽑기
         if not filtered_articles:
             fallback_articles = [
                 a for a in gpt_articles
@@ -201,7 +206,6 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             ]
             filtered_articles = fallback_articles[:3]
 
-        # 'hk' 예외 처리
         if filename and filename.lower().startswith("hk"):
             filtered_articles = [a for a in filtered_articles if a != "N/A"]
 
@@ -217,4 +221,5 @@ def extract_info_from_image(image: Image.Image, filename=None) -> dict:
             "article_numbers": [f"[ERROR] {str(e)}"],
             "used_fallback": True
         }
+
 
