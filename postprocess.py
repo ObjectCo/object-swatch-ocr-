@@ -1,5 +1,24 @@
 # postprocess.py
+
 import re
+import json
+from typing import Tuple, List
+
+# ✅ GPT 응답 파싱 (Fallback-safe JSON 파서)
+def parse_gpt_response(result_text: str) -> Tuple[str, List[str], bool]:
+    try:
+        result = json.loads(result_text)
+        company = result.get("company", "N/A").strip()
+        article_numbers = result.get("article_numbers", [])
+        return company, [a.strip().upper() for a in article_numbers], False
+    except json.JSONDecodeError:
+        # fallback 정규식 파서
+        company_match = re.search(r'"?company"?\s*:\s*"([^"]+)"', result_text)
+        raw_articles = re.findall(r'"([A-Z0-9/\-]{3,})"', result_text)
+        company = company_match.group(1).strip() if company_match else "N/A"
+        articles = list(set(raw_articles)) if raw_articles else ["N/A"]
+        return company, [a.strip().upper() for a in articles], True
+
 
 # ✅ 품번 유효성 검사
 def is_valid_article(article: str, company=None) -> bool:
